@@ -107,6 +107,43 @@ def mat3MulVec (m : Mat3) (v : Vec3) : Vec3 :=
   , mat3Get m 1 0 * v.x + mat3Get m 1 1 * v.y + mat3Get m 1 2 * v.z
   , mat3Get m 2 0 * v.x + mat3Get m 2 1 * v.y + mat3Get m 2 2 * v.z ⟩
 
+/-- Determinant of a 3×3 row-major matrix. -/
+def mat3Det (m : Mat3) : Float :=
+  let a := mat3Get m 0 0
+  let b := mat3Get m 0 1
+  let c := mat3Get m 0 2
+  let d := mat3Get m 1 0
+  let e := mat3Get m 1 1
+  let f := mat3Get m 1 2
+  let g := mat3Get m 2 0
+  let h := mat3Get m 2 1
+  let i := mat3Get m 2 2
+  a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g)
+
+/-- Inverse of a 3×3 row-major matrix via the adjugate. Returns NaN-laden
+   garbage if the input is singular (det = 0). -/
+def mat3Inv (m : Mat3) : Mat3 :=
+  let a := mat3Get m 0 0
+  let b := mat3Get m 0 1
+  let c := mat3Get m 0 2
+  let d := mat3Get m 1 0
+  let e := mat3Get m 1 1
+  let f := mat3Get m 1 2
+  let g := mat3Get m 2 0
+  let h := mat3Get m 2 1
+  let i := mat3Get m 2 2
+  let det := a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g)
+  let inv := if det == 0.0 then 0.0 else 1.0 / det
+  mat3Mk
+    (inv * (e * i - f * h))  (inv * (c * h - b * i))  (inv * (b * f - c * e))
+    (inv * (f * g - d * i))  (inv * (a * i - c * g))  (inv * (c * d - a * f))
+    (inv * (d * h - e * g))  (inv * (b * g - a * h))  (inv * (a * e - b * d))
+
+/-- DeGoes22 §3 deformation gradient combining rest and posed scaled
+   frames: `F = (B S)·(B̆ S̆)⁻¹`. Both matrices are 3×3 row-major. -/
+def deformationGradient (restFrame posedFrame : Mat3) : Mat3 :=
+  mat3Mul posedFrame (mat3Inv restFrame)
+
 end ScaledFrames
 
 /- ============================================================ -/
@@ -159,6 +196,48 @@ example :
 /-- Smallest-rotation invariants: identity input → identity matrix. -/
 example :
     mat3WithinEps (smallestRotation xUnit xUnit) mat3Identity 1e-12 = true := by native_decide
+
+/- ============================================================ -/
+/- 3×3 determinant + inverse + intersection-aware deformation   -/
+/- gradient.                                                    -/
+/- ============================================================ -/
+
+/-- det(I) = 1. -/
+example : (mat3Det mat3Identity - 1.0).abs < 1e-12 := by native_decide
+
+/-- det(diag(2, 3, 4)) = 24. -/
+example :
+    let M : Mat3 := mat3Mk 2.0 0.0 0.0  0.0 3.0 0.0  0.0 0.0 4.0
+    (mat3Det M - 24.0).abs < 1e-12 := by native_decide
+
+/-- inv(I) = I. -/
+example :
+    mat3WithinEps (mat3Inv mat3Identity) mat3Identity 1e-12 = true := by native_decide
+
+/-- inv(diag(2, 3, 4)) = diag(1/2, 1/3, 1/4). -/
+example :
+    let M  : Mat3 := mat3Mk 2.0 0.0 0.0  0.0 3.0 0.0  0.0 0.0 4.0
+    let Mi : Mat3 := mat3Mk 0.5 0.0 0.0  0.0 (1.0/3.0) 0.0  0.0 0.0 0.25
+    mat3WithinEps (mat3Inv M) Mi 1e-12 = true := by native_decide
+
+/-- inv(M) · M = I (round-trip). -/
+example :
+    let M : Mat3 := mat3Mk 2.0 1.0 0.0  1.0 2.0 1.0  0.0 1.0 2.0
+    mat3WithinEps (mat3Mul (mat3Inv M) M) mat3Identity 1e-10 = true := by native_decide
+
+/-- Identity rest, identity posed → F = I. -/
+example :
+    mat3WithinEps (deformationGradient mat3Identity mat3Identity) mat3Identity 1e-12 = true := by native_decide
+
+/-- Identity rest, anisotropic posed → F = posed (since I⁻¹ = I). -/
+example :
+    let posed : Mat3 := mat3Mk 2.0 0.0 0.0  0.0 3.0 0.0  0.0 0.0 4.0
+    mat3WithinEps (deformationGradient mat3Identity posed) posed 1e-12 = true := by native_decide
+
+/-- Same rest = posed → F = I (no deformation). -/
+example :
+    let M : Mat3 := mat3Mk 2.0 1.0 0.0  1.0 2.0 1.0  0.0 1.0 2.0
+    mat3WithinEps (deformationGradient M M) mat3Identity 1e-10 = true := by native_decide
 
 end ScaledFramesExamples
 
