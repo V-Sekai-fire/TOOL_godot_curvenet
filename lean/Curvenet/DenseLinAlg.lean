@@ -53,6 +53,16 @@ def transpose (n m : Nat) (a : Mat) : Mat := Id.run do
       out := set out n j i (get a m i j)
   return out
 
+/-- (n×m) · m-vector -> n-vector. -/
+def matVec (n m : Nat) (a : Mat) (v : Array Float) : Array Float := Id.run do
+  let mut out : Array Float := Array.replicate n 0.0
+  for i in [0:n] do
+    let mut s : Float := 0.0
+    for j in [0:m] do
+      s := s + get a m i j * v[j]!
+    out := out.set! i s
+  return out
+
 /-- Solve A · x = b for an n×n matrix A and an n-vector b via Gaussian
    elimination with partial pivoting. Returns `x` of length n. The matrix
    is assumed to be invertible; degenerate systems silently return whatever
