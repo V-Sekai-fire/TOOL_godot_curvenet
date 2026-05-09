@@ -92,6 +92,70 @@ def subdivideEdge (m : HalfedgeMesh) (h : Nat) : HalfedgeMesh := Id.run do
          , faceCount   := m.faceCount
          , halfedges   := newHalfedges }
 
+/-- Split a face by connecting `target(a)` to `target(b)` along a new
+   curvenet segment, where `a` and `b` are halfedges of the **same** face.
+
+   Pre-conditions (caller's responsibility):
+     * `m.halfedges[a].face = m.halfedges[b].face = some f`
+     * `a ≠ b` and they are non-adjacent in the face loop (otherwise the
+       split is degenerate — one of the resulting "faces" has zero area)
+     * `target(a) ≠ target(b)`
+
+   After split:
+     * vertexCount unchanged, heCount + 2, faceCount + 1
+     * Old face index `f` is reused for one sub-face (the loop containing
+       h_b and the new BA halfedge).
+     * New face index `nf` is assigned to the other sub-face (the loop
+       containing h_a and the new AB halfedge).
+     * Halfedges in the new sub-face are re-tagged from `some f` to
+       `some nf`.
+     * No cracks introduced, so the result still satisfies `manifold?`.
+-/
+def splitFace (m : HalfedgeMesh) (a b : Nat) : HalfedgeMesh := Id.run do
+  let nh := m.heCount
+  let nf := m.faceCount
+  let heA := m.halfedges[a]!
+  let heB := m.halfedges[b]!
+  let oldNextA := heA.next
+  let oldNextB := heB.next
+  let f'  : Nat := nf
+  let hAB : Nat := nh
+  let hBA : Nat := nh + 1
+
+  let mut newHalfedges := m.halfedges
+  -- Re-tag halfedges from `oldNextB` up to (but not including) `a` so they
+  -- belong to the new face f'.
+  let mut cur := oldNextB
+  let mut steps : Nat := 0
+  while cur ≠ a ∧ steps < nh do
+    let he := newHalfedges[cur]!
+    newHalfedges := newHalfedges.set! cur { he with face := some f' }
+    cur := he.next
+    steps := steps + 1
+  -- h_a joins the new face and points at the new AB halfedge.
+  newHalfedges := newHalfedges.set! a { heA with face := some f', next := hAB }
+  -- h_b stays in the old face but redirects to the new BA halfedge.
+  newHalfedges := newHalfedges.set! b { heB with next := hBA }
+
+  -- New AB halfedge: lives in face f', goes to target(b), then resumes the
+  -- old face B loop via heB's original next.
+  newHalfedges := newHalfedges.push
+    { target := heB.target
+    , twin   := some hBA
+    , next   := oldNextB
+    , face   := some f' }
+  -- New BA halfedge: lives in face f, goes to target(a), then resumes the
+  -- old face A loop via heA's original next.
+  newHalfedges := newHalfedges.push
+    { target := heA.target
+    , twin   := some hAB
+    , next   := oldNextA
+    , face   := heA.face }
+
+  return { vertexCount := m.vertexCount
+         , faceCount   := nf + 1
+         , halfedges   := newHalfedges }
+
 end CutAlgorithm
 
 /- ============================================================ -/
@@ -150,6 +214,59 @@ example :
         - (Examples.triangle.heCount / 2) =
     triangleSplit.vertexCount + (triangleSplit.faceCount + 1)
         - (triangleSplit.heCount / 2) := by native_decide
+
+/- ============================================================ -/
+/- Face split: bisect the unit quad along the (1, 3) diagonal  -/
+/- by connecting halfedge 0 (target=1) to halfedge 2 (target=3).-/
+/- Result: two triangle faces, no cracks, still manifold.       -/
+/- ============================================================ -/
+
+def quadDiagonalSplit : HalfedgeMesh := splitFace Examples.quad 0 2
+
+example : quadDiagonalSplit.vertexCount = 4 := by native_decide
+example : quadDiagonalSplit.heCount     = 10 := by native_decide
+example : quadDiagonalSplit.faceCount   = 2 := by native_decide
+example : quadDiagonalSplit.manifold?   = true := by native_decide
+
+/-- Each of the two new sub-faces is a triangle (3-halfedge loop). -/
+example :
+    let m := quadDiagonalSplit
+    -- Face A loop starting at halfedge 1 (which stayed in face 0).
+    let lenA := Id.run do
+      let mut cur := m.halfedges[1]!.next
+      let mut steps : Nat := 1
+      while cur ≠ 1 ∧ steps < m.heCount do
+        cur := m.halfedges[cur]!.next
+        steps := steps + 1
+      return steps
+    -- Face B loop starting at halfedge 0 (now in the new face 1).
+    let lenB := Id.run do
+      let mut cur := m.halfedges[0]!.next
+      let mut steps : Nat := 1
+      while cur ≠ 0 ∧ steps < m.heCount do
+        cur := m.halfedges[cur]!.next
+        steps := steps + 1
+      return steps
+    (lenA = 3 ∧ lenB = 3) := by native_decide
+
+/-- Euler characteristic V − E + F = 2 also holds after a face split
+   (we add 0 V, 1 E, 1 F so the alternating sum is unchanged). -/
+example :
+    Examples.quad.vertexCount + (Examples.quad.faceCount + 1)
+        - (Examples.quad.heCount / 2) =
+    quadDiagonalSplit.vertexCount + (quadDiagonalSplit.faceCount + 1)
+        - (quadDiagonalSplit.heCount / 2) := by native_decide
+
+/-- Composition: subdivide an edge, then split the resulting face.
+   Builds an N=5 polygon split into a triangle + a quad. -/
+def quadSubdivThenSplit : HalfedgeMesh :=
+  let m := subdivideEdge Examples.quad 0   -- 5 verts, 10 he, 1 face
+  splitFace m 1 3                            -- split via diagonal of resulting pentagon
+
+example : quadSubdivThenSplit.vertexCount = 5 := by native_decide
+example : quadSubdivThenSplit.heCount     = 12 := by native_decide
+example : quadSubdivThenSplit.faceCount   = 2 := by native_decide
+example : quadSubdivThenSplit.manifold?   = true := by native_decide
 
 end CutAlgorithmExamples
 
