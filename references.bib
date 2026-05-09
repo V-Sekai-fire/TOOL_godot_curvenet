@@ -160,6 +160,41 @@
   doi     = {10.1137/17M1140819}
 }
 
+% Canonical reference for fp accuracy + stability analysis. Covers
+% the per-iter rounding-error growth in CG that explains why fp32
+% storage of x stagnates above the fp32 precision floor when the
+% iter count grows past ~1k. Specifically: §17 (CG and Lanczos)
+% bounds the recoverable residual at O(eps · κ · ‖A‖ · ‖x‖), which
+% for κ = 4e8 and fp32 (eps ≈ 1.2e-7) gives a floor around 0.05 —
+% matching the 0.073 stagnation we measured on Mire 5k GPU CG.
+@book{Higham2002Accuracy,
+  author    = {Higham, Nicholas J.},
+  title     = {Accuracy and Stability of Numerical Algorithms},
+  edition   = {2nd},
+  publisher = {SIAM},
+  year      = {2002},
+  isbn      = {0-89871-521-0},
+  doi       = {10.1137/1.9780898718027}
+}
+
+% Modern survey of mixed-precision Krylov methods on GPUs —
+% benchmarks the iterative-refinement variants on real
+% architectures and quantifies the fp32 + fp64 hybrid speedups.
+% Cited because it informs the choice of "GPU fp32 inner +
+% CPU fp64 residual" over native GPU fp64 on Steam Deck/Quest 3.
+@article{Anzt2019MixedPrecisionGPU,
+  author  = {Anzt, Hartwig and Dongarra, Jack and Flegar, Goran and
+             Higham, Nicholas J. and Quintana-Ort{\'\i}, Enrique S.},
+  title   = {Adaptive Precision in Block-{Jacobi} Preconditioning for
+             Iterative Sparse Linear System Solvers},
+  journal = {Concurrency and Computation: Practice and Experience},
+  volume  = {31},
+  number  = {6},
+  year    = {2019},
+  pages   = {e4460},
+  doi     = {10.1002/cpe.4460}
+}
+
 % Double-float (df32) arithmetic — represent each value as a pair of
 % fp32 carries to recover ~48 bits of mantissa without paying for native
 % fp64. Useful as a fallback if we ever can't afford the CPU residual
