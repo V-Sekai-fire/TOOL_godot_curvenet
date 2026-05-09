@@ -81,3 +81,10 @@ tests/bin/*
 
 src/gen/
 .obsidian/
+
+# Character mesh assets — externally sourced (V-Sekai-fire/mesh-mille-
+# mire-feuille), too large to track in-tree. The bench reads pre-baked
+# vertex data from tests/mire_body_data.h instead, so the .blend / .glb
+# only need to be present locally when re-baking.
+demo/character/*.blend
+demo/character/*.glb

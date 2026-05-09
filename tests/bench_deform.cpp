@@ -18,9 +18,13 @@
 #include "curvenet/sparse_linalg.h"
 #include "curvenet/vec3.h"
 
+#include "mire_body_data.h"
+
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstdint>
+#include <cstring>
 #include <vector>
 
 using curvenet::Vec3;
@@ -293,6 +297,191 @@ BenchRow run_sparse(int n, int frames) {
 	return row;
 }
 
+// `mire_body_data.h` was emitted by Blender directly into the test
+// tree — no parsing, no file I/O at runtime. Just upcast fp32 to fp64
+// once and we're holding the same vectors a `make_*` helper would
+// produce.
+struct LoadedMesh {
+    std::vector<Vec3> positions;
+    std::vector<int>  tris;
+    bool ok = false;
+};
+
+LoadedMesh load_mire_body() {
+    LoadedMesh m;
+    m.positions.reserve(mire_body::n_verts);
+    for (int i = 0; i < mire_body::n_verts; ++i) {
+        m.positions.push_back({
+            static_cast<double>(mire_body::positions[i * 3 + 0]),
+            static_cast<double>(mire_body::positions[i * 3 + 1]),
+            static_cast<double>(mire_body::positions[i * 3 + 2]),
+        });
+    }
+    m.tris.reserve(static_cast<std::size_t>(mire_body::n_tris) * 3);
+    for (int i = 0; i < mire_body::n_tris * 3; ++i) {
+        m.tris.push_back(mire_body::tris[i]);
+    }
+    m.ok = true;
+    return m;
+}
+
+// Find the index of the mesh vertex closest to the given world position.
+int closest_vertex(const std::vector<Vec3> &positions, const Vec3 &target) {
+    int best = 0;
+    double best_d2 = 1e300;
+    for (std::size_t i = 0; i < positions.size(); ++i) {
+        const double dx = positions[i].x - target.x;
+        const double dy = positions[i].y - target.y;
+        const double dz = positions[i].z - target.z;
+        const double d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 < best_d2) { best_d2 = d2; best = static_cast<int>(i); }
+    }
+    return best;
+}
+
+// Sparse warm-start path on a real (loaded) mesh. Promotes 4 vertices
+// closest to hand-picked world positions to sample columns.
+struct RealRow {
+    const char *label;
+    std::size_t nv;
+    std::size_t nh;
+    int         nc;
+    double      bind_ms;
+    double      frame_ms_avg;
+};
+
+RealRow run_real(const char *label, const LoadedMesh &m,
+                  const std::vector<Vec3> &sample_targets, int frames) {
+    const std::size_t nv = m.positions.size();
+    const curvenet::HalfedgeMesh hm =
+        curvenet::halfedge_builder::from_triangles(nv, m.tris);
+
+    cm::CutMesh c;
+    c.base = hm;
+    c.vertex_kind.assign(nv, cm::CutVertexKind::mesh_vertex_kind());
+    c.segment_of_halfedge.assign(hm.he_count(), -1);
+    std::vector<int> sample_verts;
+    for (std::size_t s = 0; s < sample_targets.size(); ++s) {
+        const int vi = closest_vertex(m.positions, sample_targets[s]);
+        c.vertex_kind[static_cast<std::size_t>(vi)] =
+            cm::CutVertexKind::sample_kind(static_cast<int>(s), 0, false);
+        sample_verts.push_back(vi);
+    }
+    const int nc = static_cast<int>(sample_targets.size());
+    const std::size_t nh = hm.he_count();
+
+    const double t_bind = now_ms();
+    const sp::SparseMatrixCSR Lh_csr   = cml::assemble_lh_csr(c, m.positions);
+    const sp::SparseMatrixCSR LhsM_csr = cml::assemble_vt_lh_v_csr(c, m.positions);
+    const double bind_ms = now_ms() - t_bind;
+
+    auto sample_col = [](int curve_id, int /*sample_idx*/, bool /*side*/) {
+        return curve_id;
+    };
+
+    std::vector<double> Fc(nc * 9, 0.0);
+    for (int s = 0; s < nc; ++s) {
+        Fc[s * 9 + 0] = 1.0;
+        Fc[s * 9 + 4] = 1.0;
+        Fc[s * 9 + 8] = 1.0;
+    }
+
+    auto apply_vt = [&](const std::vector<double> &Y_he, std::size_t k) {
+        std::vector<double> out(nv * k, 0.0);
+        for (std::size_t h = 0; h < nh; ++h) {
+            const int col = cm::v_column_of(c, h);
+            if (col < 0) continue;
+            for (std::size_t cc = 0; cc < k; ++cc) {
+                out[static_cast<std::size_t>(col) * k + cc] += Y_he[h * k + cc];
+            }
+        }
+        return out;
+    };
+
+    const std::size_t cg_max_iter = std::max<std::size_t>(50, nv * 2);
+    auto cg_multi = [&](std::size_t k, const std::vector<double> &rhs,
+                         const std::vector<double> *prev) {
+        std::vector<double> X(nv * k, 0.0);
+        std::vector<double> b_col(nv, 0.0);
+        std::vector<double> x0_col(nv, 0.0);
+        const bool have_prev = (prev != nullptr) && (prev->size() == nv * k);
+        for (std::size_t cc = 0; cc < k; ++cc) {
+            for (std::size_t i = 0; i < nv; ++i) {
+                b_col[i] = rhs[i * k + cc];
+                x0_col[i] = have_prev ? (*prev)[i * k + cc] : 0.0;
+            }
+            const std::vector<double> x_col =
+                sp::cg_with_guess(LhsM_csr, b_col, x0_col, cg_max_iter, 1e-8);
+            for (std::size_t i = 0; i < nv; ++i) X[i * k + cc] = x_col[i];
+        }
+        return X;
+    };
+
+    std::vector<double> prev_Fv, prev_Xv;
+    bool prev_valid = false;
+
+    double frame_total_ms = 0.0;
+    for (int fr = 0; fr < frames; ++fr) {
+        // Drift Xc per frame so warm-start has nontrivial work.
+        std::vector<double> Xc(nc * 3);
+        for (int s = 0; s < nc; ++s) {
+            Xc[s * 3 + 0] = sample_targets[s].x;
+            Xc[s * 3 + 1] = sample_targets[s].y + 0.01 * fr;
+            Xc[s * 3 + 2] = sample_targets[s].z;
+        }
+
+        const double t0 = now_ms();
+        const std::vector<double> CFc =
+            hs::compute_c_fc_matrix(c, sample_col, Fc, 9);
+        const std::vector<double> Lh_CFc = sp::spmv_multi(Lh_csr, CFc, 9);
+        const std::vector<double> Vt_Lh_CFc = apply_vt(Lh_CFc, 9);
+        std::vector<double> rhs_a(nv * 9, 0.0);
+        for (std::size_t i = 0; i < nv * 9; ++i) rhs_a[i] = -Vt_Lh_CFc[i];
+        const std::vector<double> Fv =
+            cg_multi(9, rhs_a, prev_valid ? &prev_Fv : nullptr);
+
+        const std::vector<double> Fh =
+            ds::compute_fh(c, sample_col, Fv, Fc, 9);
+        const std::vector<double> Ff =
+            ds::average_over_faces(c, Fh, 9);
+        const std::vector<double> yh =
+            ds::compute_yh(c, m.positions, Ff);
+
+        const std::vector<double> CXc =
+            hs::compute_c_fc_matrix(c, sample_col, Xc, 3);
+        std::vector<double> diff(nh * 3, 0.0);
+        for (std::size_t i = 0; i < nh * 3; ++i) diff[i] = CXc[i] - yh[i];
+        const std::vector<double> Lh_diff = sp::spmv_multi(Lh_csr, diff, 3);
+        const std::vector<double> Vt_Lh_diff = apply_vt(Lh_diff, 3);
+        std::vector<double> rhs_b(nv * 3, 0.0);
+        for (std::size_t i = 0; i < nv * 3; ++i) rhs_b[i] = -Vt_Lh_diff[i];
+        const std::vector<double> Xv =
+            cg_multi(3, rhs_b, prev_valid ? &prev_Xv : nullptr);
+        (void)Xv;
+
+        prev_Fv = Fv; prev_Xv = Xv; prev_valid = true;
+        frame_total_ms += now_ms() - t0;
+    }
+
+    RealRow row{ label, nv, nh, nc, bind_ms, frame_total_ms / frames };
+    return row;
+}
+
+void print_real_table(const char *title, const std::vector<RealRow> &rows) {
+    std::printf("%s\n\n", title);
+    std::printf("%-30s %-7s %-7s %-4s %-12s %-12s %-12s\n",
+                  "label", "nv", "nh", "nc", "bind ms", "frame ms", "frames/s");
+    std::printf("--------------------------------------------------------------------------------\n");
+    for (const auto &row : rows) {
+        const double fps = (row.frame_ms_avg > 0.0)
+            ? (1000.0 / row.frame_ms_avg) : 0.0;
+        std::printf("%-30s %-7zu %-7zu %-4d %-12.2f %-12.2f %-12.1f\n",
+                      row.label, row.nv, row.nh, row.nc,
+                      row.bind_ms, row.frame_ms_avg, fps);
+    }
+    std::printf("\n");
+}
+
 void print_table(const char *title, const std::vector<BenchRow> &rows) {
 	std::printf("%s\n\n", title);
 	std::printf("%-6s %-7s %-7s %-12s %-12s %-12s\n",
@@ -328,6 +517,34 @@ int main(int argc, char ** /*argv*/) {
 	}
 	print_table("DeGoes22 deformer — sparse CSR + Jacobi-PCG path (current)",
 	             sparse_rows);
+
+	// Real character mesh: Mire body (5485 verts, 9956 tris). Vertex
+	// and triangle data is baked into `tests/mire_body_data.h` by
+	// Blender MCP — no runtime I/O.
+	const LoadedMesh mire = load_mire_body();
+	if (mire.ok) {
+		std::vector<RealRow> real_rows;
+		const std::vector<Vec3> samples_4 = {
+			{  0.4,  0.0, 1.0 },   // right waist
+			{ -0.4,  0.0, 1.0 },   // left  waist
+			{  0.0,  0.0, 1.6 },   // chest
+			{  0.0,  0.0, 0.6 },   // pelvis
+		};
+		real_rows.push_back(run_real("Mire body, 4-sample loop", mire,
+		                              samples_4, frames));
+
+		const std::vector<Vec3> samples_8 = {
+			{  0.4,  0.0, 1.0 }, { -0.4,  0.0, 1.0 },
+			{  0.0,  0.0, 1.6 }, {  0.0,  0.0, 0.6 },
+			{  0.5,  0.0, 0.4 }, { -0.5,  0.0, 0.4 },
+			{  0.5,  0.0, 1.5 }, { -0.5,  0.0, 1.5 },
+		};
+		real_rows.push_back(run_real("Mire body, 8-sample loop", mire,
+		                              samples_8, frames));
+
+		print_real_table("DeGoes22 deformer — real character mesh (sparse + warm)",
+		                  real_rows);
+	}
 
 	return 0;
 }
