@@ -52,6 +52,19 @@ compile_commands.json
 !.vscode/extensions.json
 .DS_Store
 
-bin/windows/triangle_3d_cage.windows.template_debug.x86_64.dll
+bin/*
+!bin/android
+bin/android/*
+!bin/android/.gitkeep
+!bin/linux
+bin/linux/*
+!bin/linux/.gitkeep
+!bin/macos
+bin/macos/*
+!bin/macos/.gitkeep
+!bin/windows
+bin/windows/*
+!bin/windows/.gitkeep
+!bin/*.gdextension
 
 src/gen/

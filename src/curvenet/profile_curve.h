@@ -66,6 +66,30 @@ struct ProfileCurve {
 	}
 };
 
+// Godot-style curve handle: position + relative incoming/outgoing tangent offsets.
+// Mirrors Godot's Curve3D (point_position, point_in, point_out where point_in/out
+// are stored relative to the point position). Kept here so cycle 6 binding code
+// can convert without pulling godot-cpp into the math layer.
+struct CurveHandle {
+	Vec3 position;
+	Vec3 in_offset;
+	Vec3 out_offset;
+};
+
+// Build a closed ProfileCurve from a list of CurveHandles (Godot Curve3D conventions).
+inline ProfileCurve profile_from_handles(const std::vector<CurveHandle> &handles) {
+	ProfileCurve c;
+	c.handles.reserve(handles.size());
+	c.tangents_in.reserve(handles.size());
+	c.tangents_out.reserve(handles.size());
+	for (const auto &h : handles) {
+		c.handles.push_back(h.position);
+		c.tangents_in.push_back(h.position + h.in_offset);
+		c.tangents_out.push_back(h.position + h.out_offset);
+	}
+	return c;
+}
+
 } // namespace curvenet
 
 #endif

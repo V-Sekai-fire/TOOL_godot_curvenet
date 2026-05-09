@@ -83,5 +83,27 @@ int main() {
 		RC_ASSERT(cnt::approx_eq(r, expected, 1e-7));
 	});
 
+	ok &= rc::check("profile_from_handles preserves positions and resolves relative tangents", [] {
+		int n = *rc::gen::inRange<int>(3, 7);
+		std::vector<curvenet::CurveHandle> handles;
+		auto coord = rc::gen::map(rc::gen::inRange<int>(-100, 101),
+				[](int v) { return static_cast<double>(v) * 0.1; });
+		auto vec = rc::gen::construct<Vec3>(coord, coord, coord);
+		for (int i = 0; i < n; ++i) {
+			curvenet::CurveHandle h;
+			h.position = *vec;
+			h.in_offset = *vec;
+			h.out_offset = *vec;
+			handles.push_back(h);
+		}
+		ProfileCurve c = curvenet::profile_from_handles(handles);
+		RC_ASSERT(static_cast<int>(c.handles.size()) == n);
+		for (int i = 0; i < n; ++i) {
+			RC_ASSERT(cnt::approx_eq(c.handles[i], handles[i].position, 1e-12));
+			RC_ASSERT(cnt::approx_eq(c.tangents_in[i], handles[i].position + handles[i].in_offset, 1e-12));
+			RC_ASSERT(cnt::approx_eq(c.tangents_out[i], handles[i].position + handles[i].out_offset, 1e-12));
+		}
+	});
+
 	return ok ? 0 : 1;
 }
