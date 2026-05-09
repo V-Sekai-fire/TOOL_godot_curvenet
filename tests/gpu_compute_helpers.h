@@ -319,6 +319,69 @@ inline VkDescriptorSet alloc_and_bind(VkDevice device,
     return set;
 }
 
+// Record N compute dispatches into a single command buffer with
+// SHADER_WRITE -> SHADER_READ pipeline barriers between them, then
+// submit once. Cuts MoltenVK's per-submit overhead by N×.
+struct CommandBatch {
+    VkCommandBuffer cmd  = VK_NULL_HANDLE;
+    VkFence         fence = VK_NULL_HANDLE;
+    const VulkanCompute *vk = nullptr;
+
+    void begin(const VulkanCompute &vk_in) {
+        vk = &vk_in;
+        VkCommandBufferAllocateInfo cbi{};
+        cbi.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        cbi.commandPool        = vk->cmd_pool;
+        cbi.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        cbi.commandBufferCount = 1;
+        VK_OR_DIE(vkAllocateCommandBuffers(vk->device, &cbi, &cmd));
+        VkCommandBufferBeginInfo begin{};
+        begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        VK_OR_DIE(vkBeginCommandBuffer(cmd, &begin));
+    }
+
+    // Record one dispatch. Caller must call `barrier()` between
+    // dispatches that read each other's outputs.
+    void dispatch(VkPipeline pipeline, VkPipelineLayout layout,
+                    VkDescriptorSet desc_set, std::uint32_t groups_x) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, layout, 0, 1,
+                                  &desc_set, 0, nullptr);
+        vkCmdDispatch(cmd, groups_x, 1, 1);
+    }
+
+    // Insert a global compute-stage memory barrier so subsequent
+    // dispatches see the writes from previous ones. Heavy-handed but
+    // correct; the perf-tuned variant uses per-buffer barriers.
+    void barrier() {
+        VkMemoryBarrier mb{};
+        mb.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+        vkCmdPipelineBarrier(cmd,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            0, 1, &mb, 0, nullptr, 0, nullptr);
+    }
+
+    void end_and_submit_wait() {
+        VK_OR_DIE(vkEndCommandBuffer(cmd));
+        VkFenceCreateInfo fci{};
+        fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        VK_OR_DIE(vkCreateFence(vk->device, &fci, nullptr, &fence));
+        VkSubmitInfo si{};
+        si.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        si.commandBufferCount = 1;
+        si.pCommandBuffers    = &cmd;
+        VK_OR_DIE(vkQueueSubmit(vk->queue, 1, &si, fence));
+        VK_OR_DIE(vkWaitForFences(vk->device, 1, &fence, VK_TRUE, UINT64_MAX));
+        vkDestroyFence(vk->device, fence, nullptr);
+        vkFreeCommandBuffers(vk->device, vk->cmd_pool, 1, &cmd);
+        cmd = VK_NULL_HANDLE; fence = VK_NULL_HANDLE;
+    }
+};
+
 inline void run_compute_once(const VulkanCompute &vk, VkPipeline pipeline,
                                 VkPipelineLayout layout, VkDescriptorSet desc_set,
                                 std::uint32_t groups_x) {

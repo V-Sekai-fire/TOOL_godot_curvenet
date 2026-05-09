@@ -80,6 +80,12 @@ bin/gpu_vec_ops_test: gpu_vec_ops_test.cpp gpu_compute_helpers.h | bin
 bin/gpu_cg_test: gpu_cg_test.cpp gpu_compute_helpers.h gpu_cg_solver.h | bin
 	$(CXX) $(GPU_CXXFLAGS) -o $@ $< $(GPU_LDFLAGS)
 
+bin/gpu_cg_bench: gpu_cg_bench.cpp gpu_compute_helpers.h gpu_cg_solver.h | bin
+	$(CXX) $(GPU_CXXFLAGS) -O3 -DNDEBUG -o $@ $< $(GPU_LDFLAGS)
+
+gpu_bench: bin/gpu_cg_bench bin/spmv.spv bin/dot_reduce.spv bin/axpy.spv bin/jacobi.spv bin/saxpby.spv
+	@$(GPU_RUN_ENV) bin/gpu_cg_bench
+
 gpu: bin/gpu_spmv_test bin/spmv.spv \
      bin/gpu_dot_test bin/dot_reduce.spv \
      bin/gpu_vec_ops_test bin/axpy.spv bin/jacobi.spv bin/saxpby.spv \
