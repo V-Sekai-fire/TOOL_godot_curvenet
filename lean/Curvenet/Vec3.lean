@@ -15,7 +15,7 @@ structure Vec3 where
   x : Float
   y : Float
   z : Float
-deriving Repr
+deriving Repr, Inhabited
 
 namespace Vec3
 
