@@ -16,6 +16,7 @@
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/plane.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
 
 namespace godot {
 
@@ -48,6 +49,9 @@ Ref<EditorNode3DGizmo> VertexHandlesGizmoPlugin::_create_gizmo(Node3D *p_node) c
 	p_node->connect(
 			"_request_redraw",
 			Callable(const_cast<VertexHandlesGizmoPlugin *>(this), "_redraw").bind(gizmo));
+	// 4.6 doesn't auto-fire _redraw after _create_gizmo, so kick the signal once
+	// (deferred so the engine has bound node_3d to the gizmo by then).
+	p_node->call_deferred("emit_signal", "_request_redraw");
 	return gizmo;
 }
 
