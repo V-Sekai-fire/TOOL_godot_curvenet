@@ -6,20 +6,17 @@
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
-#include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 
 namespace godot {
 
-// Native port of demo/addons/VertexHandles/VertexHandles.gd. Holds a per-surface
-// array of editable vertex positions for the parent MeshInstance3D, and rebuilds
-// the parent's ArrayMesh whenever a handle is moved. Pairs with a sibling
-// VertexHandlesGizmoPlugin (editor-only) which renders draggable handles in the
-// 3D viewport.
-class VertexHandles3D : public Node3D {
-	GDCLASS(VertexHandles3D, Node3D)
+// Native port of demo/addons/VertexHandles/VertexHandles.gd. Extends
+// MeshInstance3D directly so it owns the mesh being edited; the gizmo plugin
+// renders draggable handles for each vertex of `mesh`.
+class VertexHandles3D : public MeshInstance3D {
+	GDCLASS(VertexHandles3D, MeshInstance3D)
 
 	bool wireframe = true;
 	Color wireframe_color = Color(0.39f, 0.58f, 0.93f, 1.0f); // CORNFLOWER_BLUE
@@ -43,13 +40,13 @@ public:
 
 	void _ready() override;
 
-	// Move a single handle and rebuild the parent mesh.
+	// Move a single handle and rebuild this node's mesh.
 	void set_point(int p_surface, int p_point_idx, const Vector3 &p_p);
 
-	// Rebuild point_arrays from the parent MeshInstance3D's current surfaces.
+	// Rebuild point_arrays from the current `mesh` surfaces.
 	void refresh_point_arrays();
 
-	// Rebuild the parent's ArrayMesh from the current point_arrays.
+	// Rebuild `mesh` from the current point_arrays.
 	void update_mesh();
 
 private:

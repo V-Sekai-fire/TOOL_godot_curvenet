@@ -154,11 +154,7 @@ void VertexHandlesGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 	if (vh == nullptr) {
 		return;
 	}
-	MeshInstance3D *parent = Object::cast_to<MeshInstance3D>(vh->get_parent());
-	if (parent == nullptr) {
-		return;
-	}
-	Ref<Mesh> mesh = parent->get_mesh();
+	Ref<Mesh> mesh = vh->get_mesh();
 
 	if (vh->get_wireframe() && mesh.is_valid()) {
 		PackedVector3Array lines;

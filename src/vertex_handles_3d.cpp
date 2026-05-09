@@ -68,12 +68,6 @@ TypedArray<PackedVector3Array> VertexHandles3D::get_point_arrays() const {
 }
 
 void VertexHandles3D::_ready() {
-	MeshInstance3D *parent = Object::cast_to<MeshInstance3D>(get_parent());
-	if (parent == nullptr) {
-		UtilityFunctions::printerr("VertexHandles3D: parent must be a MeshInstance3D");
-		return;
-	}
-
 	refresh_point_arrays();
 
 	// Editor-only: refresh on selection change. EditorInterface only exists
@@ -134,17 +128,13 @@ void VertexHandles3D::refresh_point_arrays() {
 		}
 	}
 
-	MeshInstance3D *parent = Object::cast_to<MeshInstance3D>(get_parent());
-	if (parent == nullptr) {
-		return;
-	}
-	Ref<Mesh> parent_mesh = parent->get_mesh();
-	if (parent_mesh.is_null()) {
+	Ref<Mesh> current = get_mesh();
+	if (current.is_null()) {
 		return;
 	}
 	// Re-host as ArrayMesh so we can call clear_surfaces / add_surface_from_arrays.
-	Ref<ArrayMesh> array_mesh = to_array_mesh(parent_mesh);
-	parent->set_mesh(array_mesh);
+	Ref<ArrayMesh> array_mesh = to_array_mesh(current);
+	set_mesh(array_mesh);
 
 	point_arrays.clear();
 	for (int i = 0; i < array_mesh->get_surface_count(); ++i) {
@@ -158,11 +148,7 @@ void VertexHandles3D::update_mesh() {
 	if (!is_node_ready() || point_arrays.is_empty()) {
 		return;
 	}
-	MeshInstance3D *parent = Object::cast_to<MeshInstance3D>(get_parent());
-	if (parent == nullptr) {
-		return;
-	}
-	Ref<ArrayMesh> array_mesh = parent->get_mesh();
+	Ref<ArrayMesh> array_mesh = get_mesh();
 	if (array_mesh.is_null()) {
 		return;
 	}
@@ -195,17 +181,10 @@ Node *VertexHandles3D::find_curvenet_deformer() const {
 	}
 	for (int i = 0; i < parent->get_child_count(); ++i) {
 		Node *c = parent->get_child(i);
-		if (c != nullptr && c->get_class() == klass) {
-			return c;
+		if (c == this || c == nullptr) {
+			continue;
 		}
-	}
-	Node *grandparent = parent->get_parent();
-	if (grandparent == nullptr) {
-		return nullptr;
-	}
-	for (int i = 0; i < grandparent->get_child_count(); ++i) {
-		Node *c = grandparent->get_child(i);
-		if (c != nullptr && c->get_class() == klass) {
+		if (c->get_class() == klass) {
 			return c;
 		}
 	}
