@@ -41,26 +41,33 @@ thirdparty/
 ## Build
 
 ```sh
-scons                  # builds the GDExtension
-make -C tests test     # runs RapidCheck property tests
+scons                          # builds the GDExtension via godot-cpp
+make -C tests test             # runs RapidCheck property tests (godot-cpp-free)
+cd lean && lake build          # checks the Lean4 formalization
 ```
 
 The Makefile under `tests/` builds independently of godot-cpp so the math layer
-can be iterated without a Godot toolchain.
+iterates without a Godot toolchain. The Lean4 project under `lean/` mirrors
+the math as `def`s and `native_decide`s concrete property checks.
 
 ## Status (TDD progress)
 
 | Cycle | What | Properties | Status |
 |-------|------|------------|--------|
 | 1 | Cubic Bezier eval + derivative | 6 | green |
-| 2 | Closed-loop profile curve | 6 | green |
+| 2 | Closed-loop profile curve | 7 | green |
 | 3 | Bilinear Coons patch (quads) | 6 | green |
 | 4 | N-gon patch scaffold (N=4 path) | 3 | green |
-| 5 | Mesh binding & deformation | TBD | pending |
-| 6 | `CurveNetDeformer3D` Godot node | TBD | pending |
-| 7 | Tris-to-quads via LEMON matching | 5 | stub failing (expected) |
+| 5 | Mesh binding & deformation | 5 | green |
+| 6 | `CurveNetDeformer3D` Godot node | — | scons-builds; deform-from-curves WIP |
+| 7 | Tris-to-quads via LEMON matching | 5 | green |
+| 8 | LEMON `-fno-exceptions` patch | — | green (extension compiles cleanly) |
+| 9 | Lean4 proof companion | 12 instance theorems | green (`lake build` passes) |
 
-Total: **27 properties, 2700 random cases passing** across cycles 1-4.
+**RapidCheck:** 32 properties × 100 random cases = 3,200 checks passing.
+**Lean4:** 12 `native_decide` corner-recovery theorems passing on Float-valued
+specifications mirroring the C++ math. Generic-over-ℝ theorems deferred until
+Mathlib is wired in.
 
 ## Acknowledgements
 
