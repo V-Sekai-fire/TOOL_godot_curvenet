@@ -39,8 +39,10 @@ CurveNetGizmoPlugin::CurveNetGizmoPlugin() {
 	create_material("regular",         Color(1.0f, 1.0f, 1.0f, 1.0f));
 	create_material("intersection",    Color(0.4f, 1.0f, 0.4f, 1.0f));
 	create_material("tangent",         Color(1.0f, 0.85f, 0.3f, 1.0f));
+	create_material("tangent_link",    Color(1.0f, 0.85f, 0.3f, 0.6f));
 	create_material("projection_link", Color(0.4f, 0.8f, 1.0f, 1.0f));
-	create_handle_material("knot_handles", false);
+	create_handle_material("knot_handles",    false);
+	create_handle_material("tangent_handles", false);
 }
 
 namespace {
@@ -69,6 +71,73 @@ build_graph_from_deformer(CurveNetDeformer3D *deformer) {
 		input.push_back(pts);
 	}
 	return curvenet::curvenet_builder::build(input, 1.0e-6);
+}
+
+// Tangent-handle reference: which Curve3D handle and which side
+// (point_in vs point_out).
+struct TangentRef {
+	int  curve_id;
+	int  knot_idx;
+	bool is_out;
+};
+
+// Walk the merged graph and emit `point_in` followed by `point_out`
+// for every (curve, handle) pair. The order is deterministic so the
+// secondary handle id maps back to the same TangentRef in every
+// callback.
+inline std::vector<TangentRef>
+enumerate_tangent_refs(const curvenet::curvenet_builder::CurvenetGraph &g) {
+	std::vector<TangentRef> out;
+	for (std::size_t k = 0; k < g.knot_positions.size(); ++k) {
+		for (const auto &ref : g.incidence[k]) {
+			out.push_back({ ref.curve_id, ref.knot_idx, false });
+			out.push_back({ ref.curve_id, ref.knot_idx, true  });
+		}
+	}
+	return out;
+}
+
+// Collect the source mesh's vertex positions (pure C++ Vec3 list) so
+// snap-to-surface code can do nearest-vertex lookup without re-touching
+// godot-cpp on every call.
+inline std::vector<curvenet::Vec3>
+collect_source_mesh_positions(CurveNetDeformer3D *deformer) {
+	std::vector<curvenet::Vec3> out;
+	const NodePath src_path = deformer->get_source_path();
+	Node *src_node = deformer->get_node_or_null(src_path);
+	MeshInstance3D *src = Object::cast_to<MeshInstance3D>(src_node);
+	if (src == nullptr) {
+		return out;
+	}
+	Ref<Mesh> mesh = src->get_mesh();
+	if (mesh.is_null()) {
+		return out;
+	}
+	for (int s = 0; s < mesh->get_surface_count(); ++s) {
+		Array arrays = mesh->surface_get_arrays(s);
+		PackedVector3Array verts = arrays[Mesh::ARRAY_VERTEX];
+		out.reserve(out.size() + static_cast<std::size_t>(verts.size()));
+		for (int i = 0; i < verts.size(); ++i) {
+			Vector3 v = verts[i];
+			out.push_back({ v.x, v.y, v.z });
+		}
+	}
+	return out;
+}
+
+inline Vector3 snap_to_nearest_vertex(const Vector3 &target,
+                                        const std::vector<curvenet::Vec3> &mesh_positions) {
+	if (mesh_positions.empty()) {
+		return target;
+	}
+	const std::vector<curvenet::Vec3> probe = {{ target.x, target.y, target.z }};
+	const auto pj = curvenet::surface_projection::project_to_vertices(probe, mesh_positions);
+	if (pj.empty() || pj[0].mesh_index < 0) {
+		return target;
+	}
+	return Vector3(static_cast<float>(pj[0].position.x),
+	                static_cast<float>(pj[0].position.y),
+	                static_cast<float>(pj[0].position.z));
 }
 
 } // namespace
@@ -102,12 +171,15 @@ String CurveNetGizmoPlugin::_get_gizmo_name() const {
 }
 
 String CurveNetGizmoPlugin::_get_handle_name(const Ref<EditorNode3DGizmo> &p_gizmo,
-                                               int32_t p_id, bool /*p_secondary*/) const {
+                                               int32_t p_id, bool p_secondary) const {
+	if (p_secondary) {
+		return String("tangent ") + String::num_int64(p_id);
+	}
 	return String("knot ") + String::num_int64(p_id);
 }
 
 Variant CurveNetGizmoPlugin::_get_handle_value(const Ref<EditorNode3DGizmo> &p_gizmo,
-                                                  int32_t p_id, bool /*p_secondary*/) const {
+                                                  int32_t p_id, bool p_secondary) const {
 	if (p_gizmo.is_null()) {
 		return Variant();
 	}
@@ -117,15 +189,38 @@ Variant CurveNetGizmoPlugin::_get_handle_value(const Ref<EditorNode3DGizmo> &p_g
 		return Variant();
 	}
 	const auto graph = build_graph_from_deformer(deformer);
-	if (p_id < 0 || static_cast<std::size_t>(p_id) >= graph.knot_positions.size()) {
+	const TypedArray<Curve3D> curves = deformer->get_profile_curves();
+
+	if (!p_secondary) {
+		if (p_id < 0 || static_cast<std::size_t>(p_id) >= graph.knot_positions.size()) {
+			return Variant();
+		}
+		const curvenet::Vec3 &p = graph.knot_positions[p_id];
+		return Vector3(static_cast<float>(p.x),
+		                static_cast<float>(p.y),
+		                static_cast<float>(p.z));
+	}
+
+	// Secondary: tangent handle. Return the world position
+	// (anchor + offset) so a Vector3 is the natural restore value.
+	const std::vector<TangentRef> tangents = enumerate_tangent_refs(graph);
+	if (p_id < 0 || static_cast<std::size_t>(p_id) >= tangents.size()) {
 		return Variant();
 	}
-	const curvenet::Vec3 &p = graph.knot_positions[p_id];
-	return Vector3(static_cast<float>(p.x), static_cast<float>(p.y), static_cast<float>(p.z));
+	const TangentRef &tref = tangents[p_id];
+	Ref<Curve3D> c = curves[tref.curve_id];
+	if (c.is_null()) {
+		return Variant();
+	}
+	const Vector3 anchor = c->get_point_position(tref.knot_idx);
+	const Vector3 offset = tref.is_out
+		? c->get_point_out(tref.knot_idx)
+		: c->get_point_in(tref.knot_idx);
+	return anchor + offset;
 }
 
 void CurveNetGizmoPlugin::_set_handle(const Ref<EditorNode3DGizmo> &p_gizmo,
-                                        int32_t p_id, bool /*p_secondary*/,
+                                        int32_t p_id, bool p_secondary,
                                         Camera3D *p_camera, const Vector2 &p_screen_pos) {
 	if (p_gizmo.is_null() || p_camera == nullptr) {
 		return;
@@ -136,39 +231,75 @@ void CurveNetGizmoPlugin::_set_handle(const Ref<EditorNode3DGizmo> &p_gizmo,
 		return;
 	}
 	const auto graph = build_graph_from_deformer(deformer);
-	if (p_id < 0 || static_cast<std::size_t>(p_id) >= graph.knot_positions.size()) {
-		return;
-	}
+	const TypedArray<Curve3D> curves = deformer->get_profile_curves();
+
 	const Vector3 ray_from = p_camera->project_ray_origin(p_screen_pos);
 	const Vector3 ray_dir  = p_camera->project_ray_normal(p_screen_pos);
-	const curvenet::Vec3 &k = graph.knot_positions[p_id];
-	const Vector3 plane_point(static_cast<float>(k.x),
-	                            static_cast<float>(k.y),
-	                            static_cast<float>(k.z));
 	const Vector3 plane_normal = p_camera->get_camera_transform().basis.get_column(2);
-	Plane plane(plane_normal, plane_point);
-	Array planes;
-	planes.append(plane);
-	PackedVector3Array hits = Geometry3D::get_singleton()->segment_intersects_convex(
-		ray_from, ray_from + ray_dir * 16384.0f, planes);
-	if (hits.is_empty()) {
-		return;
-	}
-	const Vector3 hit_world = hits[0];
-	// Drag every (curve, handle) pair that ε-merged onto this knot.
-	const TypedArray<Curve3D> curves = deformer->get_profile_curves();
-	for (const curvenet::curvenet_builder::KnotRef &ref : graph.incidence[p_id]) {
-		Ref<Curve3D> c = curves[ref.curve_id];
-		if (c.is_valid() && ref.knot_idx >= 0 && ref.knot_idx < c->get_point_count()) {
-			c->set_point_position(ref.knot_idx, hit_world);
+
+	// Helper: ray vs camera-facing plane through `anchor_world`.
+	auto raycast_to_plane = [&](const Vector3 &anchor_world) -> Vector3 {
+		Plane plane(plane_normal, anchor_world);
+		Array planes;
+		planes.append(plane);
+		PackedVector3Array hits = Geometry3D::get_singleton()->segment_intersects_convex(
+			ray_from, ray_from + ray_dir * 16384.0f, planes);
+		if (hits.is_empty()) {
+			return anchor_world;
+		}
+		return hits[0];
+	};
+
+	if (!p_secondary) {
+		// Primary handle: drag a merged knot. All incident Curve3D handles
+		// follow, then snap the result to the closest source-mesh vertex.
+		if (p_id < 0 || static_cast<std::size_t>(p_id) >= graph.knot_positions.size()) {
+			return;
+		}
+		const curvenet::Vec3 &k = graph.knot_positions[p_id];
+		const Vector3 anchor_world(static_cast<float>(k.x),
+		                            static_cast<float>(k.y),
+		                            static_cast<float>(k.z));
+		Vector3 hit = raycast_to_plane(anchor_world);
+		const std::vector<curvenet::Vec3> mesh_positions =
+			collect_source_mesh_positions(deformer);
+		hit = snap_to_nearest_vertex(hit, mesh_positions);
+		for (const curvenet::curvenet_builder::KnotRef &ref : graph.incidence[p_id]) {
+			Ref<Curve3D> c = curves[ref.curve_id];
+			if (c.is_valid() && ref.knot_idx >= 0 && ref.knot_idx < c->get_point_count()) {
+				c->set_point_position(ref.knot_idx, hit);
+			}
+		}
+	} else {
+		// Secondary handle: drag a tangent. Free-floating in 3D (no
+		// surface snap — tangents are control points, not anchors).
+		const std::vector<TangentRef> tangents = enumerate_tangent_refs(graph);
+		if (p_id < 0 || static_cast<std::size_t>(p_id) >= tangents.size()) {
+			return;
+		}
+		const TangentRef &tref = tangents[p_id];
+		Ref<Curve3D> c = curves[tref.curve_id];
+		if (c.is_null()) {
+			return;
+		}
+		const Vector3 anchor   = c->get_point_position(tref.knot_idx);
+		const Vector3 cur_off  = tref.is_out ? c->get_point_out(tref.knot_idx)
+		                                       : c->get_point_in(tref.knot_idx);
+		const Vector3 anchor_world = anchor + cur_off;
+		const Vector3 hit          = raycast_to_plane(anchor_world);
+		const Vector3 new_off      = hit - anchor;
+		if (tref.is_out) {
+			c->set_point_out(tref.knot_idx, new_off);
+		} else {
+			c->set_point_in(tref.knot_idx, new_off);
 		}
 	}
-	// Re-run the deformer so the gizmo + the source mesh both refresh.
+
 	deformer->apply_deformation();
 }
 
 void CurveNetGizmoPlugin::_commit_handle(const Ref<EditorNode3DGizmo> &p_gizmo,
-                                           int32_t p_id, bool /*p_secondary*/,
+                                           int32_t p_id, bool p_secondary,
                                            const Variant &p_restore, bool p_cancel) {
 	if (p_gizmo.is_null()) {
 		return;
@@ -180,18 +311,38 @@ void CurveNetGizmoPlugin::_commit_handle(const Ref<EditorNode3DGizmo> &p_gizmo,
 	}
 	const TypedArray<Curve3D> curves = deformer->get_profile_curves();
 	const auto graph = build_graph_from_deformer(deformer);
-	if (p_id < 0 || static_cast<std::size_t>(p_id) >= graph.knot_positions.size()) {
-		return;
-	}
 
 	if (p_cancel) {
-		// User cancelled: restore every incident handle to the saved
-		// position.
-		const Vector3 old = p_restore;
-		for (const curvenet::curvenet_builder::KnotRef &ref : graph.incidence[p_id]) {
-			Ref<Curve3D> c = curves[ref.curve_id];
-			if (c.is_valid() && ref.knot_idx >= 0 && ref.knot_idx < c->get_point_count()) {
-				c->set_point_position(ref.knot_idx, old);
+		// User cancelled: roll the affected curve handles back to the
+		// `p_restore` value the editor handed us at click time.
+		if (!p_secondary) {
+			if (p_id < 0 ||
+					static_cast<std::size_t>(p_id) >= graph.knot_positions.size()) {
+				return;
+			}
+			const Vector3 old = p_restore;
+			for (const curvenet::curvenet_builder::KnotRef &ref : graph.incidence[p_id]) {
+				Ref<Curve3D> c = curves[ref.curve_id];
+				if (c.is_valid() && ref.knot_idx >= 0 && ref.knot_idx < c->get_point_count()) {
+					c->set_point_position(ref.knot_idx, old);
+				}
+			}
+		} else {
+			const std::vector<TangentRef> tangents = enumerate_tangent_refs(graph);
+			if (p_id < 0 || static_cast<std::size_t>(p_id) >= tangents.size()) {
+				return;
+			}
+			const TangentRef &tref = tangents[p_id];
+			Ref<Curve3D> c = curves[tref.curve_id];
+			if (c.is_valid()) {
+				const Vector3 old_world  = p_restore;
+				const Vector3 anchor     = c->get_point_position(tref.knot_idx);
+				const Vector3 old_offset = old_world - anchor;
+				if (tref.is_out) {
+					c->set_point_out(tref.knot_idx, old_offset);
+				} else {
+					c->set_point_in(tref.knot_idx, old_offset);
+				}
 			}
 		}
 		deformer->apply_deformation();
@@ -206,22 +357,55 @@ void CurveNetGizmoPlugin::_commit_handle(const Ref<EditorNode3DGizmo> &p_gizmo,
 		return;
 	}
 
-	const curvenet::Vec3 &k = graph.knot_positions[p_id];
-	const Vector3 current(static_cast<float>(k.x),
-	                       static_cast<float>(k.y),
-	                       static_cast<float>(k.z));
-	undo->create_action("Move curvenet knot " + String::num_int64(p_id));
-	for (const curvenet::curvenet_builder::KnotRef &ref : graph.incidence[p_id]) {
-		Ref<Curve3D> c = curves[ref.curve_id];
-		if (c.is_null() || ref.knot_idx < 0 || ref.knot_idx >= c->get_point_count()) {
-			continue;
+	if (!p_secondary) {
+		if (p_id < 0 ||
+				static_cast<std::size_t>(p_id) >= graph.knot_positions.size()) {
+			return;
 		}
-		undo->add_do_method(c.ptr(),   "set_point_position", ref.knot_idx, current);
-		undo->add_undo_method(c.ptr(), "set_point_position", ref.knot_idx, p_restore);
+		const curvenet::Vec3 &k = graph.knot_positions[p_id];
+		const Vector3 current(static_cast<float>(k.x),
+		                       static_cast<float>(k.y),
+		                       static_cast<float>(k.z));
+		undo->create_action("Move curvenet knot " + String::num_int64(p_id));
+		for (const curvenet::curvenet_builder::KnotRef &ref : graph.incidence[p_id]) {
+			Ref<Curve3D> c = curves[ref.curve_id];
+			if (c.is_null() || ref.knot_idx < 0 || ref.knot_idx >= c->get_point_count()) {
+				continue;
+			}
+			undo->add_do_method(c.ptr(),   "set_point_position", ref.knot_idx, current);
+			undo->add_undo_method(c.ptr(), "set_point_position", ref.knot_idx, p_restore);
+		}
+		undo->add_do_method(deformer,   "apply_deformation");
+		undo->add_undo_method(deformer, "apply_deformation");
+		undo->commit_action(false);
+		return;
 	}
+
+	// Secondary tangent handle.
+	const std::vector<TangentRef> tangents = enumerate_tangent_refs(graph);
+	if (p_id < 0 || static_cast<std::size_t>(p_id) >= tangents.size()) {
+		return;
+	}
+	const TangentRef &tref = tangents[p_id];
+	Ref<Curve3D> c = curves[tref.curve_id];
+	if (c.is_null()) {
+		return;
+	}
+	const Vector3 anchor      = c->get_point_position(tref.knot_idx);
+	const Vector3 cur_off     = tref.is_out ? c->get_point_out(tref.knot_idx)
+	                                          : c->get_point_in(tref.knot_idx);
+	const Vector3 cur_world   = anchor + cur_off;
+	const Vector3 old_world   = p_restore;
+	const Vector3 old_offset  = old_world - anchor;
+	const String setter       = tref.is_out ? "set_point_out" : "set_point_in";
+	undo->create_action("Move curvenet tangent " + String::num_int64(p_id));
+	undo->add_do_method(c.ptr(),   setter, tref.knot_idx, cur_off);
+	undo->add_undo_method(c.ptr(), setter, tref.knot_idx, old_offset);
 	undo->add_do_method(deformer,   "apply_deformation");
 	undo->add_undo_method(deformer, "apply_deformation");
 	undo->commit_action(false);
+	(void)cur_world; // appease unused-var warning when undo->add_do_method
+	                 // signatures don't reference it directly.
 }
 
 void CurveNetGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
@@ -322,7 +506,43 @@ void CurveNetGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 	if (handle_positions.size() > 0) {
 		p_gizmo->add_handles(
 			handle_positions, get_material("knot_handles", p_gizmo),
-			handle_ids, false, false);
+			handle_ids, false, /*secondary=*/false);
+	}
+
+	// Tangent handles (secondary): one each for point_in / point_out of
+	// every (curve, knot_idx) reference in the graph. Index order matches
+	// `enumerate_tangent_refs` so id ↔ TangentRef agrees across callbacks.
+	const std::vector<TangentRef> tangents_drag = enumerate_tangent_refs(graph);
+	PackedVector3Array tangent_handle_positions;
+	PackedInt32Array   tangent_handle_ids;
+	PackedVector3Array tangent_link_lines;
+	tangent_handle_positions.resize(tangents_drag.size());
+	tangent_handle_ids.resize(tangents_drag.size());
+	for (std::size_t i = 0; i < tangents_drag.size(); ++i) {
+		const TangentRef &tr = tangents_drag[i];
+		Ref<Curve3D> tc = curves[tr.curve_id];
+		if (tc.is_null()) {
+			continue;
+		}
+		const Vector3 anchor = tc->get_point_position(tr.knot_idx);
+		const Vector3 offset = tr.is_out
+			? tc->get_point_out(tr.knot_idx)
+			: tc->get_point_in(tr.knot_idx);
+		const Vector3 world  = anchor + offset;
+		tangent_handle_positions.set(i, world);
+		tangent_handle_ids.set(i, static_cast<int>(i));
+		tangent_link_lines.push_back(anchor);
+		tangent_link_lines.push_back(world);
+	}
+	if (tangent_link_lines.size() > 0) {
+		p_gizmo->add_lines(
+			tangent_link_lines, get_material("tangent_link", p_gizmo), false,
+			Color(1.0f, 0.85f, 0.3f, 0.6f));
+	}
+	if (tangent_handle_positions.size() > 0) {
+		p_gizmo->add_handles(
+			tangent_handle_positions, get_material("tangent_handles", p_gizmo),
+			tangent_handle_ids, false, /*secondary=*/true);
 	}
 
 	// Tangent rays at intersection knots: short line per outgoing tangent.
