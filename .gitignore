@@ -67,4 +67,9 @@ bin/windows/*
 !bin/windows/.gitkeep
 !bin/*.gdextension
 
+# Compiled test binaries and macOS debug symbol bundles
+tests/bin/*
+!tests/bin/.gitkeep
+*.dSYM/
+
 src/gen/
