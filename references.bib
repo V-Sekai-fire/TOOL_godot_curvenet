@@ -211,6 +211,65 @@
 }
 
 % =================================================================
+% Wang group at Style3D / Ohio State — directly applicable to the
+% deformer's solver bottleneck. Wu 2022 implements multilevel
+% additive Schwarz on GPU for cloth and deformable bodies; mirror
+% at https://github.com/V-Sekai/preconditioner-for-cloth-and-
+% deformable-body-simulation. Wang 2015 / 2018 / Wang & Yang 2016
+% are companion techniques (Chebyshev, multigrid, descent methods).
+% Li 2023 layers subspace preconditioning on top.
+% =================================================================
+
+@article{Wu2022MultilevelSchwarz,
+  author    = {Wu, Botao and Wang, Zhendong and Wang, Huamin},
+  title     = {A {GPU}-Based Multilevel Additive {Schwarz} Preconditioner
+               for Cloth and Deformable Body Simulation},
+  journal   = {ACM Transactions on Graphics (SIGGRAPH)},
+  volume    = {41},
+  number    = {4},
+  articleno = {63},
+  numpages  = {14},
+  year      = {2022},
+  month     = jul,
+  doi       = {10.1145/3528223.3530085}
+}
+
+@article{Wang2015Chebyshev,
+  author  = {Wang, Huamin},
+  title   = {A {Chebyshev} Semi-Iterative Approach for Accelerating
+             Projective and Position-Based Dynamics},
+  journal = {ACM Transactions on Graphics (SIGGRAPH Asia)},
+  volume  = {34},
+  number  = {6},
+  articleno = {246},
+  year    = {2015},
+  doi     = {10.1145/2816795.2818063}
+}
+
+@article{Wang2018ParallelMultigrid,
+  author  = {Wang, Zhendong and Wu, Longhua and Fratarcangeli, Marco
+             and Tang, Min and Wang, Huamin},
+  title   = {Parallel Multigrid for Nonlinear Cloth Simulation},
+  journal = {Computer Graphics Forum (Pacific Graphics)},
+  volume  = {37},
+  number  = {7},
+  year    = {2018},
+  pages   = {131--141},
+  doi     = {10.1111/cgf.13554}
+}
+
+@article{Wang2016DescentGPU,
+  author  = {Wang, Huamin and Yang, Yin},
+  title   = {Descent Methods for Elastic Body Simulation on the {GPU}},
+  journal = {ACM Transactions on Graphics (SIGGRAPH Asia)},
+  volume  = {35},
+  number  = {6},
+  articleno = {212},
+  year    = {2016},
+  doi     = {10.1145/2980179.2980236}
+}
+
+% =================================================================
 % Domain decomposition + Schwarz iteration — used by the meshlet
 % decomposition path (tests/diag_meshlet_*.cpp). Smith / Bjørstad /
 % Gropp is the canonical textbook on additive / multiplicative
