@@ -6,7 +6,11 @@
 
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/mesh.hpp>
+#include <godot_cpp/classes/mesh_instance3d.hpp>
+#include <godot_cpp/classes/surface_tool.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 namespace godot {
@@ -71,14 +75,83 @@ bool CurveNetDeformer3D::is_deformation_active() const {
 }
 
 void CurveNetDeformer3D::apply_deformation() {
-	// STUB: Cycle 6 GREEN will:
-	//   1. Pull triangles from the source MeshInstance3D's mesh.
-	//   2. Run curvenet::tris_to_quads to fuse pairs into quads.
-	//   3. Auto-bind each source vertex to (face, s, t).
-	//   4. Build curvenet::CurveNet from profile_curves (Curve3D -> ProfileCurve).
-	//   5. Call curvenet::deform and write back to a new ArrayMesh.
-	// For now this is a no-op so the class registers and the demo loads.
-	UtilityFunctions::print("CurveNetDeformer3D::apply_deformation() — TODO cycle 6 GREEN");
+	// Cycle 6 GREEN — first slice:
+	//   - Pull triangles from the source MeshInstance3D.
+	//   - Run curvenet::tris_to_quads to fuse pairs into quads.
+	//   - Rebuild a quad-dominant ArrayMesh with the SurfaceTool.
+	//
+	// Profile-curve binding + Coons-patch deformation will be wired in the
+	// next iteration; this cycle proves the full pipeline (mesh extraction →
+	// tri-to-quad → mesh emit) compiles and round-trips.
+	Node *src_node = get_node_or_null(source_path);
+	MeshInstance3D *src = Object::cast_to<MeshInstance3D>(src_node);
+	if (src == nullptr) {
+		UtilityFunctions::printerr("CurveNetDeformer3D: source_path does not point to a MeshInstance3D");
+		return;
+	}
+	Ref<Mesh> mesh = src->get_mesh();
+	if (mesh.is_null()) {
+		return;
+	}
+
+	curvenet::TriMesh tri;
+	for (int s = 0; s < mesh->get_surface_count(); ++s) {
+		Array arrays = mesh->surface_get_arrays(s);
+		PackedVector3Array verts = arrays[Mesh::ARRAY_VERTEX];
+		PackedInt32Array indices = arrays[Mesh::ARRAY_INDEX];
+		const int v_offset = static_cast<int>(tri.vertices.size());
+		for (int i = 0; i < verts.size(); ++i) {
+			Vector3 v = verts[i];
+			tri.vertices.push_back({ v.x, v.y, v.z });
+		}
+		// If indices are present use them; otherwise tris are sequential.
+		if (indices.size() > 0) {
+			for (int i = 0; i + 2 < indices.size(); i += 3) {
+				tri.triangles.push_back({ v_offset + indices[i],
+						v_offset + indices[i + 1],
+						v_offset + indices[i + 2] });
+			}
+		} else {
+			for (int i = 0; i + 2 < verts.size(); i += 3) {
+				tri.triangles.push_back({ v_offset + i, v_offset + i + 1, v_offset + i + 2 });
+			}
+		}
+	}
+
+	curvenet::TrisToQuadsParams params;
+	params.length_tiebreak = length_tiebreak;
+	curvenet::PolyMesh poly = curvenet::tris_to_quads(tri, params);
+
+	// Re-emit as a triangle ArrayMesh (quads triangulated for Godot rendering;
+	// the quad topology is preserved internally for patch evaluation in the
+	// next slice).
+	Ref<SurfaceTool> st;
+	st.instantiate();
+	st->begin(Mesh::PRIMITIVE_TRIANGLES);
+	for (const auto &v : poly.vertices) {
+		st->add_vertex(Vector3(v.x, v.y, v.z));
+	}
+	for (const auto &f : poly.faces) {
+		if (f.count == 3) {
+			st->add_index(f.v[0]);
+			st->add_index(f.v[1]);
+			st->add_index(f.v[2]);
+		} else if (f.count == 4) {
+			// Triangulate the quad along the (v0, v2) diagonal.
+			st->add_index(f.v[0]);
+			st->add_index(f.v[1]);
+			st->add_index(f.v[2]);
+			st->add_index(f.v[0]);
+			st->add_index(f.v[2]);
+			st->add_index(f.v[3]);
+		}
+	}
+	st->generate_normals();
+	Ref<ArrayMesh> out_mesh = st->commit();
+	set_mesh(out_mesh);
+
+	UtilityFunctions::print("CurveNetDeformer3D: ", static_cast<int>(tri.triangles.size()),
+			" tris -> ", static_cast<int>(poly.faces.size()), " faces");
 }
 
 } // namespace godot
