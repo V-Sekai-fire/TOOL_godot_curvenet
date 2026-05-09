@@ -73,8 +73,11 @@ file = "{}{}{}".format(libname, env["suffix"], env["SHLIBSUFFIX"])
 filepath = ""
 
 if env["platform"] == "macos" or env["platform"] == "ios":
-    filepath = "{}.framework/".format(env["platform"])
     file = "{}.{}.{}".format(libname, env["platform"], env["target"])
+    # macOS framework bundles require the directory name to match the inner
+    # binary name (minus `.framework`) so dlopen can resolve the bundle.
+    # SCons adds the `lib` SHLIBPREFIX to the binary, so we mirror that here.
+    filepath = "lib{}.framework/".format(file)
 
 libraryfile = "bin/{}/{}{}".format(env["platform"], filepath, file)
 library = env.SharedLibrary(
