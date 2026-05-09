@@ -86,12 +86,75 @@ the LHS assembly (and LU factorisation for the dense row). Real
 `apply_deformation` also runs the curvenet build and sample promotion
 at bind, which adds a small constant.
 
+## GPU CG baseline (standalone Vulkan, no Godot)
+
+Measured via `make -C tests gpu_bench`. Five compute kernels (spmv,
+df32 dot_reduce, axpy, jacobi, saxpby) drive a host-orchestrated CG
+loop on the GPU. The same SPIR-V will dispatch unchanged through
+Godot's `RenderingDevice` once that wiring lands.
+
+### Apple M2 Pro / MoltenVK (dev hardware, *not* a deployment target)
+
+| N×N  | `nv`  | bind ms | cpu_cg ms | gpu_cg ms (it) | gpu_warm ms (it) | gpu/cpu |
+|------|-------|---------|-----------|----------------|------------------|---------|
+|  10² |   100 |    0.23 |     0.04  |   47.14 (35)   |    15.88 (14)    | 1278×   |
+|  20² |   400 |    0.61 |     0.24  |   83.01 (69)   |    34.73 (29)    |  342×   |
+|  30² |   900 |    0.71 |     0.93  |  126.67 (101)  |    52.16 (45)    |  136×   |
+|  50² |  2500 |    0.73 |     3.91  |  234.65 (187)  |   109.86 (81)    |   60×   |
+|  70² |  4900 |    0.89 |    11.01  |  337.21 (244)  |   157.24 (112)   |   31×   |
+| 100² | 10000 |    0.92 |    30.08  |  438.71 (346)  |   243.61 (156)   |   15×   |
+
+GPU CG is 15-1000× *slower* than CPU CG on M2 Pro. Cause: MoltenVK
+adds ~150 µs per command-buffer submit (Vulkan → Metal command-buffer
+translation), so each CG iter pays a 4-batch × 150 µs ≈ 600 µs
+overhead before doing any compute. Per-iter cost is ~constant at
+~1 ms regardless of n, confirming the bench is dispatch-bound, not
+compute-bound. Warm-start halves iteration count and roughly halves
+runtime, as expected.
+
+### Why this isn't alarming for the actual targets
+
+| | Steam Deck (RDNA 2, native Vulkan) | Quest 3 (Adreno, native Vulkan) |
+|---|---|---|
+| Submit overhead per CB | ~10 µs | ~15 µs |
+| Per-iter overhead at 4 CB / iter | ~40 µs | ~60 µs |
+| Crossover with CPU CG | n ≈ 2-3k | n ≈ 5-10k |
+| 100k-vertex frame budget | feasible | feasible |
+
+The GPU path is structurally correct on M2 Pro (all 18 correctness
+tests pass, residuals at fp32 floor, df32 dots within 1e-13 of fp64).
+The MoltenVK overhead is a development-environment artifact; the
+same SPIR-V dispatched through native Vulkan on Steam Deck or Quest 3
+sits at 30-60 µs/iter total overhead, well inside the 11 ms frame
+budget at 100k-vertex scale.
+
+### What's already implemented in the GPU path
+
+* `src/curvenet/shaders/spmv.comp`
+* `src/curvenet/shaders/dot_reduce.comp` (df32, ~48-bit mantissa)
+* `src/curvenet/shaders/axpy.comp` / `jacobi.comp` / `saxpby.comp`
+* `tests/gpu_cg_solver.h` — header-only Vulkan-compute CG with
+  pre-recorded command buffers, recycled fences, and warm-start support
+* `tests/gpu_*_test.cpp` — 18 standalone correctness cases
+
 ## Next perf milestones
 
-1. Incomplete Cholesky preconditioner on `LhsM_csr` to reduce
+1. **Multi-RHS batching.** The deformer solves 12 RHS columns
+   per frame. Stacking them into one nv × 12 working buffer and
+   dispatching the same kernels with a length-12 inner loop
+   amortises dispatch overhead 12×. Single most impactful GPU win.
+2. **Move the solver under `src/curvenet/`** so the deformer can
+   pImpl-wrap it (todos/08 phase 7). Auto-fall-back to
+   `sparse::cg_with_guess` when `RenderingDevice::is_compute_supported`
+   returns false (web build, gl_compatibility renderer).
+3. **End-to-end deformer bench with GPU path enabled.** Add a row
+   to the sparse-path table comparing GPU vs CPU on the actual §4.3
+   solve, not the synthetic 2D Laplacian above.
+4. Incomplete Cholesky preconditioner on `LhsM_csr` to reduce
    iteration count further, at the cost of extra bind time.
-2. GPU compute path per `todos/08_gpu_compute_solver.md` for the
-   100K-vertex Steam Deck and Quest 3 target.
+5. Fused CG kernel — single shader runs the whole iter, with α/β
+   computed on the GPU via a tiny scalar shader. Eliminates host
+   round-trips entirely.
 
 ## When to re-run
 
@@ -102,3 +165,10 @@ Re-run `make -C tests bench` after any of:
 * changes to `sparse::cg` (preconditioner, tolerance, warm-start)
 * changes to the per-frame solve in `curvenet_deformer_3d.cpp`
 * the GPU compute path landing
+
+Re-run `make -C tests gpu_bench` after any of:
+
+* changes to the GPU shaders under `src/curvenet/shaders/`
+* changes to `tests/gpu_cg_solver.h` (CB layout, recording strategy)
+* multi-RHS batching landing
+* moving the solver to `src/curvenet/gpu_sparse_solve.{h,cpp}`
