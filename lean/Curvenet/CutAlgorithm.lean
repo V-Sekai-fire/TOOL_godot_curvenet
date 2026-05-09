@@ -460,6 +460,53 @@ example : quadWithCrackCM.heCount     = 10 := by native_decide
 example : quadWithCrackCM.partitionOfUnity noSampleCol = true := by native_decide
 example : quadWithCrackCM.VtCIsZero        noSampleCol = true := by native_decide
 
+/- ============================================================ -/
+/- Segment chain across multiple faces (Fig. 6 col 4): the      -/
+/- segment crosses one mesh edge between two faces. Decomposes  -/
+/- into one subdivideEdge + two splitFace calls on the two     -/
+/- adjacent faces.                                              -/
+/- ============================================================ -/
+
+/-- Two-triangle strip with a chain-1 segment from vertex 0 to vertex 3,
+   crossing the shared 1-2 edge. The segment decomposes as:
+
+     1. subdivideEdge on the shared edge (halfedge 1) — adds vertex 4
+     2. splitFace face 0 between he 2 (target = vertex 0) and he 1
+        (target = vertex 4 after subdivision) — adds the in-face
+        segment from start to the crossing
+     3. splitFace face 1 between he 3 (target = vertex 4 after
+        subdivision) and he 4 (target = vertex 3) — adds the in-face
+        segment from the crossing to the end -/
+def twoTriStripWithChain : HalfedgeMesh :=
+  let m1 := CutAlgorithm.subdivideEdge Examples.twoTriStrip 1
+  let m2 := CutAlgorithm.splitFace m1 2 1
+  CutAlgorithm.splitFace m2 3 4
+
+example : twoTriStripWithChain.vertexCount = 5 := by native_decide
+
+/-- Halfedge count: original 10 + 2 (edge subdivision) + 2 (face 0 split)
+   + 2 (face 1 split) = 16. -/
+example : twoTriStripWithChain.heCount = 16 := by native_decide
+
+/-- Face count: original 2 + 1 (face 0 split) + 1 (face 1 split) = 4. -/
+example : twoTriStripWithChain.faceCount = 4 := by native_decide
+
+/-- Manifold invariants survive the entire chain. -/
+example : twoTriStripWithChain.manifold? = true := by native_decide
+
+/-- Each of the four resulting sub-faces is a triangle (3-halfedge loop).
+   Walk face 0's loop starting at halfedge 0; expect length 3. -/
+example :
+    let m := twoTriStripWithChain
+    let len := Id.run do
+      let mut cur := m.halfedges[0]!.next
+      let mut steps : Nat := 1
+      while cur ≠ 0 ∧ steps < m.heCount do
+        cur := m.halfedges[cur]!.next
+        steps := steps + 1
+      return steps
+    len = 3 := by native_decide
+
 end CutAlgorithmExamples
 
 end Curvenet
