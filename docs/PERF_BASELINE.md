@@ -242,24 +242,38 @@ The reproducer for the stall is `tests/diag_multi_level_schwarz_70k`.
 The earlier 70k Chebyshev and 2-level Schwarz diags were removed
 as redundant.
 
-### Live candidate
+### Live candidate ✓ (loop 100/3 — ICC(0))
 
-Per a review of the Wang Huamin lab publication list, the most
-direct drop-in fix is **Lan 2025 JGS2** (`Lan2025JGS2` in
-references.bib): a second-order Jacobi / Gauss-Seidel that
-explicitly attacks the `omega·D^{-1}·r` failure mode on stiff
-systems with wide eigenvalue spread. It's a smoother swap with
-no new hierarchy required — minimal blast radius, large potential
-upside.
+Test gate passed. **Shifted ICC(0)-PCG** (Manteuffel 1980 diagonal
+shift retry) clears the 81k stall:
 
-Fallback: **Lan 2023 stencil descent** (`Lan2023StencilDescent`)
-for per-stencil second-order descent, useful inside the existing
-Schwarz blocks if JGS2 alone isn't enough.
+| Mesh   | nv    | nnz    | iters  | wall  | vs prior baseline                          |
+|--------|------:|-------:|-------:|------:|--------------------------------------------|
+| 5k     | 5485  | 36325  |    351 | 0.05 s | vs Schwarz 168 iters / 2.4 s — **48× wall** |
+| 81k    | 81613 | 563389 |  2,478 | 3.65 s | vs plain CG 200k iters / 133 s — **38× wall, 81× iters** |
 
-Test gate before pulling either into the V-cycle: drop the
-smoother into a 1-level diag on the 81k matrix and confirm it
-converges *in isolation*. Only then re-bolt onto the multilevel
-Schwarz infrastructure that's currently tombstoned.
+5k needs a non-zero diagonal shift to factor (no-fill ICC(0) on
+the 5k cot-Laplacian breaks down with a non-positive pivot at the
+first try; retry loop hits a working shift quickly). 81k factors
+clean at shift = 0. Factorisation cost: 28 s once at bind time
+on 81k, amortised across all subsequent solves.
+
+This is the first preconditioner that beats plain CG on 81k since
+the project began. Six earlier attempts (1-/2-/3-/5-/7-level
+Schwarz; HEM; kernel projection; Chebyshev) were all worse than
+no preconditioner — see "Dead ends" above and the TOMBSTONE
+headers in `src/curvenet/{two_level,multi_level,heavy_edge_matching,
+kernel_projection,chebyshev_accel}.h`.
+
+Reproducer: `make -C tests diag_70k_icc_pcg`.
+
+Fallback candidates (still on deck if ICC's per-iter cost trips
+us up at higher nv): **Lan 2025 JGS2** (`Lan2025JGS2`,
+[PDF](https://wanghmin.github.io/publication/lan-2025-jgs/Lan-2025-JGS.pdf))
+— second-order Jacobi/GS targeting the stiff-system regime.
+**Lan 2023 stencil descent** (`Lan2023StencilDescent`,
+[PDF](https://wanghmin.github.io/publication/lan-2023-sos/Lan-2023-SOS.pdf))
+— per-stencil second-order descent.
 
 ## Multi-level Schwarz (loop 8 + loop 100)
 

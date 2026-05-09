@@ -34,3 +34,4 @@ import Curvenet.TwoLevelSchwarz
 import Curvenet.MultiLevelSchwarz
 import Curvenet.HeavyEdgeMatching
 import Curvenet.KernelProjection
+import Curvenet.IncompleteCholesky
