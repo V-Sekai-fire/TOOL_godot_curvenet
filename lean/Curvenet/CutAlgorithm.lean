@@ -188,6 +188,72 @@ def splitFaceCM (cm : CutMesh) (a b : Nat) (segId : Nat) : CutMesh :=
   , vertexKind        := cm.vertexKind
   , segmentOfHalfedge := newSegs }
 
+/-- Insert a "crack" — a dead-end slit branching from a face-boundary
+   vertex into the face interior. `h_anchor` is a halfedge in the face
+   whose target is the boundary vertex the crack branches from. The new
+   vertex (index = old vertexCount) sits at the slit's far end inside
+   the face, with no other edges incident to it.
+
+   Adds +1 vertex, +2 halfedges; the face count is unchanged. The two
+   new halfedges are twins of each other and BOTH point to the same
+   face (the §4.1 crack configuration). The face's halfedge loop is
+   extended to traverse the slit (out, then back); loop length grows
+   by 2.
+
+   Pre-conditions (caller's responsibility):
+     * `m.halfedges[h_anchor].face = some f` (the crack lives inside f).
+
+   The standard `manifold?` invariants survive the operation because:
+     * twin involution holds for the new (out, in) pair
+     * source(out) = target(in) = v_boundary (slit endpoints meet at
+       the boundary vertex)
+     * the face loop is still closed; just longer
+-/
+def insertCrack (m : HalfedgeMesh) (h_anchor : Nat) : HalfedgeMesh := Id.run do
+  let nh := m.heCount
+  let nv := m.vertexCount
+  let heAnchor := m.halfedges[h_anchor]!
+  let vBoundary := heAnchor.target
+  let oldNext := heAnchor.next
+  let cIdx : Nat := nv
+  let hOut : Nat := nh       -- v_boundary → c (going into the slit)
+  let hIn  : Nat := nh + 1   -- c → v_boundary (returning from the slit)
+
+  let mut newHalfedges := m.halfedges
+  -- h_anchor now redirects into the slit instead of the next boundary halfedge.
+  newHalfedges := newHalfedges.set! h_anchor { heAnchor with next := hOut }
+  -- hOut: leaves the boundary vertex toward the slit endpoint.
+  newHalfedges := newHalfedges.push
+    { target := cIdx
+    , twin   := some hIn
+    , next   := hIn
+    , face   := heAnchor.face }
+  -- hIn: returns from the slit endpoint to the boundary vertex, then
+  -- resumes the original face loop.
+  newHalfedges := newHalfedges.push
+    { target := vBoundary
+    , twin   := some hOut
+    , next   := oldNext
+    , face   := heAnchor.face }
+
+  return { vertexCount := nv + 1
+         , faceCount   := m.faceCount
+         , halfedges   := newHalfedges }
+
+/-- CutMesh wrapper for `insertCrack`: extends vertex kind (the new
+   isolated vertex is typically a curvenet sample, hence the
+   `newVertexKind` argument) and tags both crack halfedges with the
+   supplied segment id. -/
+def insertCrackCM (cm : CutMesh) (h_anchor : Nat) (segId : Nat)
+    (newVertexKind : CutVertexKind) : CutMesh :=
+  let newBase := insertCrack cm.base h_anchor
+  let newKinds := cm.vertexKind.push newVertexKind
+  let newSegs  :=
+    cm.segmentOfHalfedge.push (some segId) |>.push (some segId)
+  { base              := newBase
+  , vertexKind        := newKinds
+  , segmentOfHalfedge := newSegs }
+
 end CutAlgorithm
 
 /- ============================================================ -/
@@ -340,6 +406,59 @@ example :
 
 example : quadSplitCM.partitionOfUnity noSampleCol = true := by native_decide
 example : quadSplitCM.VtCIsZero        noSampleCol = true := by native_decide
+
+/- ============================================================ -/
+/- Crack insertion: dead-end slit inside a face anchored at a   -/
+/- face-boundary vertex. The standard manifold? invariants still -/
+/- hold because the new pair forms a valid twin and source/      -/
+/- target match at the boundary vertex.                          -/
+/- ============================================================ -/
+
+/-- Insert a crack into the unit triangle anchored at halfedge 0
+   (target = vertex 1). The slit's far end is the new vertex 3. -/
+def triangleWithCrack : HalfedgeMesh := insertCrack Examples.triangle 0
+
+example : triangleWithCrack.vertexCount = 4 := by native_decide
+example : triangleWithCrack.heCount     = 8 := by native_decide
+example : triangleWithCrack.faceCount   = 1 := by native_decide
+
+/-- Crack insertion preserves the standard manifold invariants. -/
+example : triangleWithCrack.manifold? = true := by native_decide
+
+/-- Both crack halfedges point into the same face — the §4.1 crack
+   configuration. Halfedge indices 6 (out) and 7 (in) both have
+   `face = some 0`, and they are each other's twins. -/
+example :
+    let m  := triangleWithCrack
+    let h6 := m.halfedges[6]!
+    let h7 := m.halfedges[7]!
+    h6.face == some 0 && h7.face == some 0 &&
+    h6.twin == some 7 && h7.twin == some 6 := by
+  native_decide
+
+/-- Face 0's loop now has 5 halfedges (was 3) — the slit traversal
+   adds 2. Walk via `.next`. -/
+example :
+    let m := triangleWithCrack
+    let len := Id.run do
+      let mut cur := m.halfedges[0]!.next
+      let mut steps : Nat := 1
+      while cur ≠ 0 ∧ steps < m.heCount do
+        cur := m.halfedges[cur]!.next
+        steps := steps + 1
+      return steps
+    len = 5 := by native_decide
+
+/-- CutMesh wrapper: inserting a crack tagged with segment id 11 and
+   marking the new vertex as a sample. -/
+def quadWithCrackCM : CutMesh :=
+  CutAlgorithm.insertCrackCM CutExamples.uncutQuad 0 11
+    (CutVertexKind.sample 0 0 false)
+
+example : quadWithCrackCM.vertexCount = 5 := by native_decide
+example : quadWithCrackCM.heCount     = 10 := by native_decide
+example : quadWithCrackCM.partitionOfUnity noSampleCol = true := by native_decide
+example : quadWithCrackCM.VtCIsZero        noSampleCol = true := by native_decide
 
 end CutAlgorithmExamples
 
