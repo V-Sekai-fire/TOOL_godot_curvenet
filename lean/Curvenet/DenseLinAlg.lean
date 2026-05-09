@@ -220,6 +220,71 @@ def matWithinEps (a b : Mat) (n m : Nat) (eps : Float) : Bool := Id.run do
       if (get a m i j - get b m i j).abs ≥ eps then return false
   return true
 
+/- ============================================================ -/
+/- Cholesky factorization for SPD matrices                     -/
+/- ============================================================ -/
+/-
+Cholesky factor `A = L · Lᵀ` for symmetric positive-definite A.
+Stored in-place in the lower triangle of L (upper triangle ignored).
+
+Per-meshlet local matrices in the deformer's Schur-complement path
+are SPD (after symmetric Dirichlet pinning at boundary verts), and
+they're small (~256 verts) so dense Cholesky's O(n³) factor is
+~5.6M flops per meshlet — cheap. The per-frame back-substitution is
+O(n²) ≈ 66k flops per meshlet, dominating compute time but still
+small enough that 274 meshlets at 12 RHS columns fits in the budget.
+-/
+
+/-- Cholesky factorize an n×n SPD matrix. Returns L (lower-triangular,
+   upper triangle zero). Stable on well-conditioned SPD; produces NaN
+   on indefinite or near-singular input (the runtime should mollify
+   the matrix first). -/
+def choleskyFactor (n : Nat) (Ain : Mat) : Mat := Id.run do
+  let mut L : Mat := zeros n n
+  for j in [0:n] do
+    -- L[j, j] = sqrt(A[j, j] - Σ_{k<j} L[j, k]²)
+    let mut s : Float := 0.0
+    for k in [0:j] do
+      let v := get L n j k
+      s := s + v * v
+    let diag : Float := (get Ain n j j - s).sqrt
+    L := set L n j j diag
+    for i in [j+1:n] do
+      -- L[i, j] = (A[i, j] - Σ_{k<j} L[i, k]·L[j, k]) / L[j, j]
+      let mut t : Float := 0.0
+      for k in [0:j] do
+        t := t + get L n i k * get L n j k
+      L := set L n i j ((get Ain n i j - t) / diag)
+  return L
+
+/-- Forward solve `L · y = b` for lower-triangular L. -/
+def forwardSolve (n : Nat) (L : Mat) (b : Array Float) : Array Float := Id.run do
+  let mut y : Array Float := Array.replicate n 0.0
+  for i in [0:n] do
+    let mut s : Float := 0.0
+    for j in [0:i] do
+      s := s + get L n i j * y[j]!
+    y := y.set! i ((b[i]! - s) / get L n i i)
+  return y
+
+/-- Backward solve `Lᵀ · x = y` for upper-triangular Lᵀ. We pass L
+   (the lower-triangular factor) directly and read its transpose. -/
+def backwardSolve (n : Nat) (L : Mat) (y : Array Float) : Array Float := Id.run do
+  let mut x : Array Float := Array.replicate n 0.0
+  for ii in [0:n] do
+    let i := n - 1 - ii
+    let mut s : Float := 0.0
+    for j in [i+1:n] do
+      -- Reading Lᵀ[i, j] = L[j, i]
+      s := s + get L n j i * x[j]!
+    x := x.set! i ((y[i]! - s) / get L n i i)
+  return x
+
+/-- Solve `A · x = b` given Cholesky factor L of A. Composes the
+   forward and backward triangular solves. -/
+def solveWithCholesky (n : Nat) (L : Mat) (b : Array Float) : Array Float :=
+  backwardSolve n L (forwardSolve n L b)
+
 end DenseLinAlg
 
 /- ============================================================ -/
@@ -365,6 +430,63 @@ example :
     let f := factorizeLU 3 A
     let xLU := solveWithLU f b
     vecWithinEps xDirect xLU 1e-10 = true := by native_decide
+
+/-- Cholesky on the 2×2 SPD `[[4, 2], [2, 3]]`. Analytical L =
+   `[[2, 0], [1, √2]]`. -/
+example :
+    let A : Mat := #[4.0, 2.0,
+                      2.0, 3.0]
+    let L := choleskyFactor 2 A
+    let expected : Mat := #[2.0, 0.0,
+                             1.0, 2.0.sqrt]
+    matWithinEps L expected 2 2 1e-12 = true := by native_decide
+
+/-- Cholesky composes back to A: `L · Lᵀ ≈ A` on the 2×2. -/
+example :
+    let A : Mat := #[4.0, 2.0,
+                      2.0, 3.0]
+    let L := choleskyFactor 2 A
+    let LT := transpose 2 2 L
+    let LLT := matMul 2 2 2 L LT
+    matWithinEps LLT A 2 2 1e-12 = true := by native_decide
+
+/-- Forward+backward Cholesky solve recovers x on the 2×2 SPD. -/
+example :
+    let A : Mat := #[4.0, 2.0,
+                      2.0, 3.0]
+    let b : Array Float := #[10.0, 8.0]
+    -- Analytical: x = A⁻¹ b. det(A) = 8; A⁻¹ = [[3/8, -1/4], [-1/4, 1/2]].
+    -- x = (3/8 · 10 - 1/4 · 8, -1/4 · 10 + 1/2 · 8) = (1.75, 1.5)
+    let L := choleskyFactor 2 A
+    let x := solveWithCholesky 2 L b
+    vecWithinEps x #[1.75, 1.5] 1e-12 = true := by native_decide
+
+/-- Cholesky on a 4×4 1D Laplacian-like SPD matches LU's answer on
+   the same problem (independent verification of the new path). -/
+example :
+    let A : Mat :=
+      #[ 2.0, -1.0,  0.0,  0.0,
+         -1.0,  2.0, -1.0,  0.0,
+          0.0, -1.0,  2.0, -1.0,
+          0.0,  0.0, -1.0,  2.0]
+    let b : Array Float := #[1.0, 0.0, 0.0, 0.0]
+    let xLU := solve 4 A b
+    let L := choleskyFactor 4 A
+    let xCh := solveWithCholesky 4 L b
+    vecWithinEps xLU xCh 1e-10 = true := by native_decide
+
+/-- Multi-RHS via reusing the same Cholesky factor: solve A · x_i = b_i
+   for several b_i without refactoring. -/
+example :
+    let A : Mat := #[4.0, 2.0,
+                      2.0, 3.0]
+    let L := choleskyFactor 2 A
+    let b1 : Array Float := #[10.0, 8.0]   -- expected (1.75, 1.5)
+    let b2 : Array Float := #[4.0, 3.0]    -- expected (0.75, 0.5)
+    let x1 := solveWithCholesky 2 L b1
+    let x2 := solveWithCholesky 2 L b2
+    (vecWithinEps x1 #[1.75, 1.5] 1e-12 ∧
+     vecWithinEps x2 #[0.75, 0.5] 1e-12) = true := by native_decide
 
 end LinAlgExamples
 

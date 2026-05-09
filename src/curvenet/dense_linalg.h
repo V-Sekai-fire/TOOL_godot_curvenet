@@ -278,6 +278,75 @@ inline bool mat_within_eps(const std::vector<double> &a, const std::vector<doubl
 	return true;
 }
 
+// ============================================================
+// Cholesky factorization for SPD matrices
+// ============================================================
+//
+// Mirrors `Curvenet.DenseLinAlg.choleskyFactor` / `forwardSolve` /
+// `backwardSolve` / `solveWithCholesky` in the Lean spec. Used by the
+// meshlet Schur-complement path: each per-meshlet local matrix is
+// SPD after symmetric Dirichlet pinning; we factor each one once at
+// bind time and reuse the factor for fast back-substitution per
+// frame.
+
+inline std::vector<double> cholesky_factor(std::size_t n,
+                                              const std::vector<double> &A) {
+	std::vector<double> L(n * n, 0.0);
+	for (std::size_t j = 0; j < n; ++j) {
+		double s = 0.0;
+		for (std::size_t k = 0; k < j; ++k) {
+			const double v = L[j * n + k];
+			s += v * v;
+		}
+		const double diag_sq = A[j * n + j] - s;
+		const double diag    = std::sqrt(diag_sq);
+		L[j * n + j] = diag;
+		for (std::size_t i = j + 1; i < n; ++i) {
+			double t = 0.0;
+			for (std::size_t k = 0; k < j; ++k) {
+				t += L[i * n + k] * L[j * n + k];
+			}
+			L[i * n + j] = (A[i * n + j] - t) / diag;
+		}
+	}
+	return L;
+}
+
+inline std::vector<double> forward_solve(std::size_t n,
+                                            const std::vector<double> &L,
+                                            const std::vector<double> &b) {
+	std::vector<double> y(n, 0.0);
+	for (std::size_t i = 0; i < n; ++i) {
+		double s = 0.0;
+		for (std::size_t j = 0; j < i; ++j) {
+			s += L[i * n + j] * y[j];
+		}
+		y[i] = (b[i] - s) / L[i * n + i];
+	}
+	return y;
+}
+
+inline std::vector<double> backward_solve(std::size_t n,
+                                              const std::vector<double> &L,
+                                              const std::vector<double> &y) {
+	std::vector<double> x(n, 0.0);
+	for (std::size_t ii = 0; ii < n; ++ii) {
+		const std::size_t i = n - 1 - ii;
+		double s = 0.0;
+		for (std::size_t j = i + 1; j < n; ++j) {
+			s += L[j * n + i] * x[j];   // Lᵀ[i, j] = L[j, i]
+		}
+		x[i] = (y[i] - s) / L[i * n + i];
+	}
+	return x;
+}
+
+inline std::vector<double> solve_with_cholesky(std::size_t n,
+                                                   const std::vector<double> &L,
+                                                   const std::vector<double> &b) {
+	return backward_solve(n, L, forward_solve(n, L, b));
+}
+
 } // namespace dense
 } // namespace curvenet
 
