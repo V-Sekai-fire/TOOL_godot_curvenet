@@ -25,4 +25,3 @@ SOFTWARE.
 Third-party libraries vendored under thirdparty/:
 - godot-cpp: MIT License (see thirdparty/godot-cpp/LICENSE.txt)
 - rapidcheck: BSD 2-Clause (see thirdparty/rapidcheck/LICENSE.md)
-- LEMON: Boost Software License 1.0 (see thirdparty/lemon/LICENSE)

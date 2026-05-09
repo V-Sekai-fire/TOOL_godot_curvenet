@@ -19,14 +19,16 @@
 namespace godot {
 
 // CurveNetDeformer3D drives a source mesh's vertices via Pixar-style profile
-// curves. It triangulates the input mesh, fuses pairs of triangles into quads
-// via LEMON max-weight matching (so each face has 4 boundaries), then evaluates
-// each face as a bilinear-blended Coons patch with the user-authored profile
-// curves as boundaries.
+// curves following DeGoes22 (`DeGoes2022Curvenet` in references.bib). The
+// runtime ε-merges shared endpoints across all `profile_curves`, projects
+// each merged knot to its closest mesh vertex (sample-promoting it), then
+// runs §4.3's two-stage harmonic / Poisson solve to deform the mesh.
 //
-// Authoring: drop a `CurveNetDeformer3D` next to your mesh and assign a few
-// `Curve3D` resources to `profile_curves`. The existing VertexHandles addon
-// (sibling repo) gives you in-editor handles for the underlying control points.
+// Authoring: drop a `CurveNetDeformer3D` next to your mesh and assign one
+// or more `Curve3D` resources to `profile_curves`. The associated
+// `CurveNetGizmoPlugin` adds in-editor handles for the curvenet knots and
+// the per-handle tangents so users can drag them; dragging snaps the knot
+// to the nearest source-mesh vertex and re-runs the solver.
 class CurveNetDeformer3D : public MeshInstance3D {
 	GDCLASS(CurveNetDeformer3D, MeshInstance3D)
 

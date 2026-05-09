@@ -1,0 +1,142 @@
+% Bibliographic references for the algorithms implemented in this
+% project. The two load-bearing Pixar papers are cited throughout the
+% Lean spec and C++ runtime; the remaining entries are referenced from
+% the deferred-work design docs under todos/ as candidate upgrades to
+% the polygon Laplacian, the cut-mesh straightest-path, and the
+% mean-value coordinate scheme.
+
+% =================================================================
+% Load-bearing: the algorithm this project implements.
+% =================================================================
+
+@article{DeGoes2022Curvenet,
+  author     = {de Goes, Fernando and Sheffler, William and Fleischer, Kurt},
+  title      = {Character Articulation through Profile Curves},
+  journal    = {ACM Transactions on Graphics},
+  volume     = {41},
+  number     = {4},
+  articleno  = {139},
+  numpages   = {14},
+  year       = {2022},
+  month      = jul,
+  publisher  = {Association for Computing Machinery},
+  address    = {New York, NY, USA},
+  doi        = {10.1145/3528223.3530060},
+  url        = {https://doi.org/10.1145/3528223.3530060}
+}
+
+@inproceedings{Nguyen2023Elemental,
+  author     = {Nguyen, Duc and Talbot, Jeremie and Sheffler, William and
+                Hessler, Mark and Fleischer, Kurt and de Goes, Fernando},
+  title      = {Shaping the Elements: Curvenet Animation Controls in
+                Pixar's {Elemental}},
+  booktitle  = {ACM SIGGRAPH 2023 Talks},
+  year       = {2023},
+  publisher  = {Association for Computing Machinery},
+  address    = {New York, NY, USA},
+  doi        = {10.1145/3587421.3595415},
+  url        = {https://doi.org/10.1145/3587421.3595415}
+}
+
+% =================================================================
+% Polygon Laplacian — current implementation uses fan-triangulation
+% cot weights; todos/07 plans an upgrade to one of these formulations
+% so the cot weights stay finite on degenerate / non-convex cut-faces.
+% =================================================================
+
+@article{deGoes2020Polygon,
+  author    = {de Goes, Fernando and Butts, Andrew and Desbrun, Mathieu},
+  title     = {Discrete Differential Operators on Polygonal Meshes},
+  journal   = {ACM Transactions on Graphics},
+  volume    = {39},
+  number    = {4},
+  articleno = {110},
+  year      = {2020},
+  month     = jul,
+  doi       = {10.1145/3386569.3392389}
+}
+
+@article{Sharp2020Nonmanifold,
+  author  = {Sharp, Nicholas and Crane, Keenan},
+  title   = {A {Laplacian} for Nonmanifold Triangle Meshes},
+  journal = {Computer Graphics Forum},
+  volume  = {39},
+  number  = {5},
+  year    = {2020},
+  pages   = {69--80},
+  doi     = {10.1111/cgf.14069}
+}
+
+@article{Bunge2020Polygon,
+  author  = {Bunge, Astrid and Herholz, Philipp and Kazhdan, Misha and Botsch, Mario},
+  title   = {Polygon {Laplacian} Made Simple},
+  journal = {Computer Graphics Forum},
+  volume  = {39},
+  number  = {2},
+  year    = {2020},
+  pages   = {303--313},
+  doi     = {10.1111/cgf.13931}
+}
+
+% =================================================================
+% Mean-value coordinates — referenced by the older N>=5 ngon-patch
+% slice (now removed from the active pipeline; kept here for
+% historical context).
+% =================================================================
+
+@article{Floater2003MVC,
+  author  = {Floater, Michael S.},
+  title   = {Mean Value Coordinates},
+  journal = {Computer Aided Geometric Design},
+  volume  = {20},
+  number  = {1},
+  year    = {2003},
+  pages   = {19--27},
+  doi     = {10.1016/S0167-8396(03)00002-5}
+}
+
+@article{Hormann2008MVC,
+  author  = {Hormann, Kai and Sukumar, Natarajan},
+  title   = {Maximum Entropy Coordinates for Arbitrary Polytopes},
+  journal = {Computer Graphics Forum},
+  volume  = {27},
+  number  = {5},
+  year    = {2008},
+  pages   = {1513--1520},
+  doi     = {10.1111/j.1467-8659.2008.01292.x}
+}
+
+% =================================================================
+% Cut-mesh straightest-path — DeGoes22 §4.1 uses Polthier-Schmies
+% to trace curvenet segments across multiple mesh polygons. The
+% current Lean spec stubs this; the C++ runtime takes a caller-
+% supplied edge-crossing list. Implementing the geometric trace is
+% deferred (see slice 20 + todos).
+% =================================================================
+
+@inproceedings{Polthier1998Straightest,
+  author    = {Polthier, Konrad and Schmies, Markus},
+  title     = {Straightest Geodesics on Polyhedral Surfaces},
+  booktitle = {Mathematical Visualization: Algorithms, Applications and Numerics},
+  publisher = {Springer},
+  year      = {1998},
+  pages     = {135--150},
+  doi       = {10.1007/978-3-662-03567-2_10}
+}
+
+% =================================================================
+% Manifold pre-processor — todos/06 locks in fTetWild as the runtime
+% manifold-repair pass before the cut-mesh algorithm runs.
+% =================================================================
+
+@article{Hu2020fTetWild,
+  author  = {Hu, Yixin and Schneider, Teseo and Wang, Bolun and
+             Zorin, Denis and Panozzo, Daniele},
+  title   = {Fast Tetrahedral Meshing in the Wild},
+  journal = {ACM Transactions on Graphics},
+  volume  = {39},
+  number  = {4},
+  year    = {2020},
+  pages   = {117:1--117:18},
+  doi     = {10.1145/3386569.3392385}
+}
