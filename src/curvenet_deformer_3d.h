@@ -4,6 +4,10 @@
 #define CURVENET_DEFORMER_3D_H
 
 #include "curvenet/curvenet.h"
+#include "curvenet/tris_to_quads.h"
+
+#include <cstdint>
+#include <vector>
 
 #include <godot_cpp/classes/curve3d.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
@@ -29,8 +33,21 @@ class CurveNetDeformer3D : public MeshInstance3D {
 	double length_tiebreak = 0.1;
 	bool deformation_active = false;
 
+	// Cache of the rest-pose pipeline: tris_to_quads + bind_polymesh outputs.
+	// Invalidated when source mesh, source_path, or length_tiebreak changes.
+	struct RestCache {
+		bool valid = false;
+		curvenet::PolyMesh poly;
+		std::vector<curvenet::BoundVertex> bindings;
+		// Hash of the source ArrayMesh's vertex/index data so we can detect
+		// edits without recomputing every frame.
+		uint64_t source_hash = 0;
+	};
+	mutable RestCache rest_cache;
+
 protected:
 	static void _bind_methods();
+	void invalidate_cache();
 
 public:
 	CurveNetDeformer3D() = default;
@@ -49,8 +66,8 @@ public:
 	bool is_deformation_active() const;
 
 	// Recompute the deformed mesh from the current profile_curves and apply
-	// it to this MeshInstance3D's mesh. Idempotent; cheap if curves haven't
-	// changed because internal binding is cached.
+	// it to this MeshInstance3D's mesh. Cheap on subsequent calls because
+	// the rest-pose tri->quad fusion + binding is cached.
 	void apply_deformation();
 };
 

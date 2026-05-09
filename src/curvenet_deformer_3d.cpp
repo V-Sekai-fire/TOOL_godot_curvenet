@@ -70,8 +70,16 @@ void CurveNetDeformer3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("apply_deformation"), &CurveNetDeformer3D::apply_deformation);
 }
 
+void CurveNetDeformer3D::invalidate_cache() {
+	rest_cache.valid = false;
+	rest_cache.poly = curvenet::PolyMesh{};
+	rest_cache.bindings.clear();
+	rest_cache.source_hash = 0;
+}
+
 void CurveNetDeformer3D::set_source_path(const NodePath &p_path) {
 	source_path = p_path;
+	invalidate_cache();
 }
 
 NodePath CurveNetDeformer3D::get_source_path() const {
@@ -80,6 +88,8 @@ NodePath CurveNetDeformer3D::get_source_path() const {
 
 void CurveNetDeformer3D::set_profile_curves(const TypedArray<Curve3D> &p_curves) {
 	profile_curves = p_curves;
+	// Profile curves don't affect the rest-pose cache (only bindings do); no
+	// invalidation needed.
 }
 
 TypedArray<Curve3D> CurveNetDeformer3D::get_profile_curves() const {
@@ -88,6 +98,7 @@ TypedArray<Curve3D> CurveNetDeformer3D::get_profile_curves() const {
 
 void CurveNetDeformer3D::set_length_tiebreak(double p_v) {
 	length_tiebreak = p_v;
+	invalidate_cache(); // tri-to-quad weights depend on length_tiebreak
 }
 
 double CurveNetDeformer3D::get_length_tiebreak() const {
@@ -106,14 +117,6 @@ bool CurveNetDeformer3D::is_deformation_active() const {
 }
 
 void CurveNetDeformer3D::apply_deformation() {
-	// Cycle 6 GREEN — first slice:
-	//   - Pull triangles from the source MeshInstance3D.
-	//   - Run curvenet::tris_to_quads to fuse pairs into quads.
-	//   - Rebuild a quad-dominant ArrayMesh with the SurfaceTool.
-	//
-	// Profile-curve binding + Coons-patch deformation will be wired in the
-	// next iteration; this cycle proves the full pipeline (mesh extraction →
-	// tri-to-quad → mesh emit) compiles and round-trips.
 	Node *src_node = get_node_or_null(source_path);
 	MeshInstance3D *src = Object::cast_to<MeshInstance3D>(src_node);
 	if (src == nullptr) {
@@ -125,6 +128,26 @@ void CurveNetDeformer3D::apply_deformation() {
 		return;
 	}
 
+	// Hash the source mesh's vertex+index data so we can detect edits without
+	// re-running tri->quad each call. RID is stable per Mesh resource so we
+	// fold it together with the surface count and per-surface array sizes.
+	uint64_t hash_val = static_cast<uint64_t>(mesh->get_rid().get_id());
+	hash_val = hash_val * 1099511628211ULL + static_cast<uint64_t>(mesh->get_surface_count());
+	for (int s = 0; s < mesh->get_surface_count(); ++s) {
+		Array arrays = mesh->surface_get_arrays(s);
+		PackedVector3Array verts = arrays[Mesh::ARRAY_VERTEX];
+		PackedInt32Array indices = arrays[Mesh::ARRAY_INDEX];
+		hash_val = hash_val * 1099511628211ULL + static_cast<uint64_t>(verts.size());
+		hash_val = hash_val * 1099511628211ULL + static_cast<uint64_t>(indices.size());
+	}
+
+	if (rest_cache.valid && rest_cache.source_hash == hash_val) {
+		// Rest-pose pipeline (tri->quad + bind) is cached; skip ahead to the
+		// build-curves-and-deform path.
+		goto rest_cache_hit;
+	}
+
+	{
 	curvenet::TriMesh tri;
 	for (int s = 0; s < mesh->get_surface_count(); ++s) {
 		Array arrays = mesh->surface_get_arrays(s);
@@ -151,10 +174,15 @@ void CurveNetDeformer3D::apply_deformation() {
 
 	curvenet::TrisToQuadsParams params;
 	params.length_tiebreak = length_tiebreak;
-	curvenet::PolyMesh poly = curvenet::tris_to_quads(tri, params);
+	rest_cache.poly = curvenet::tris_to_quads(tri, params);
+	rest_cache.bindings = curvenet::bind_polymesh(rest_cache.poly);
+	rest_cache.source_hash = hash_val;
+	rest_cache.valid = true;
+	}
 
-	// Auto-bind each rest-pose vertex to its closest quad face's bilinear (s,t).
-	std::vector<curvenet::BoundVertex> bindings = curvenet::bind_polymesh(poly);
+rest_cache_hit:
+	const curvenet::PolyMesh &poly = rest_cache.poly;
+	const std::vector<curvenet::BoundVertex> &bindings = rest_cache.bindings;
 
 	// Build a CurveNet from authored Curve3D profile_curves. For now each
 	// quad face's 4 boundaries come from straight-line bezier segments
@@ -242,8 +270,10 @@ void CurveNetDeformer3D::apply_deformation() {
 	Ref<ArrayMesh> out_mesh = st->commit();
 	set_mesh(out_mesh);
 
-	UtilityFunctions::print("CurveNetDeformer3D: ", static_cast<int>(tri.triangles.size()),
-			" tris -> ", static_cast<int>(poly.faces.size()), " faces");
+	UtilityFunctions::print("CurveNetDeformer3D: ",
+			static_cast<int>(poly.vertices.size()), " verts, ",
+			static_cast<int>(poly.faces.size()), " faces (cache ",
+			(rest_cache.valid ? "valid" : "miss"), ")");
 }
 
 } // namespace godot
