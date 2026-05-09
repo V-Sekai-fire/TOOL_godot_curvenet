@@ -195,6 +195,12 @@ bin/diag_meshlet_solve: diag_meshlet_solve.cpp mire_body_data.h $(MESHOPT_OBJ) |
 diag_meshlet_solve: bin/diag_meshlet_solve
 	@bin/diag_meshlet_solve
 
+bin/diag_meshlet_schwarz: diag_meshlet_schwarz.cpp mire_body_data.h $(MESHOPT_OBJ) | bin
+	$(CXX) $(BENCH_CXXFLAGS) -I$(MESHOPT_DIR)/src -o $@ $< $(MESHOPT_OBJ)
+
+diag_meshlet_schwarz: bin/diag_meshlet_schwarz
+	@bin/diag_meshlet_schwarz
+
 clean:
 	rm -rf bin $(LIBRC)
 	find $(RC)/src -name "*.o" -delete
