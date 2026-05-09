@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: MIT
 #include "curvenet_deformer_3d.h"
 
+#include "curvenet/profile_curve.h"
 #include "curvenet/tris_to_quads.h"
 
 #include <godot_cpp/classes/array_mesh.hpp>
+#include <godot_cpp/classes/curve3d.hpp>
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/surface_tool.hpp>
@@ -14,6 +16,30 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 namespace godot {
+
+namespace {
+
+// Convert a Godot Curve3D (point_position + relative point_in/point_out)
+// into our pure-math closed-loop ProfileCurve.
+curvenet::ProfileCurve to_profile_curve(const Ref<Curve3D> &c) {
+	std::vector<curvenet::CurveHandle> handles;
+	if (c.is_null()) {
+		return curvenet::ProfileCurve{};
+	}
+	const int n = c->get_point_count();
+	handles.reserve(n);
+	for (int i = 0; i < n; ++i) {
+		Vector3 p = c->get_point_position(i);
+		Vector3 in_off = c->get_point_in(i);
+		Vector3 out_off = c->get_point_out(i);
+		handles.push_back({ { p.x, p.y, p.z },
+				{ in_off.x, in_off.y, in_off.z },
+				{ out_off.x, out_off.y, out_off.z } });
+	}
+	return curvenet::profile_from_handles(handles);
+}
+
+} // namespace
 
 void CurveNetDeformer3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_source_path", "path"), &CurveNetDeformer3D::set_source_path);
@@ -121,6 +147,18 @@ void CurveNetDeformer3D::apply_deformation() {
 	curvenet::TrisToQuadsParams params;
 	params.length_tiebreak = length_tiebreak;
 	curvenet::PolyMesh poly = curvenet::tris_to_quads(tri, params);
+
+	// Convert each authored Curve3D to a ProfileCurve so the next slice can
+	// build a CurveNet from them. For now we just diagnostic-print to verify
+	// the round-trip works in editor.
+	std::vector<curvenet::ProfileCurve> profiles;
+	profiles.reserve(profile_curves.size());
+	for (int i = 0; i < profile_curves.size(); ++i) {
+		Ref<Curve3D> c = profile_curves[i];
+		profiles.push_back(to_profile_curve(c));
+	}
+	UtilityFunctions::print("CurveNetDeformer3D: ", static_cast<int>(profiles.size()),
+			" profile curves loaded");
 
 	// Re-emit as a triangle ArrayMesh (quads triangulated for Godot rendering;
 	// the quad topology is preserved internally for patch evaluation in the
