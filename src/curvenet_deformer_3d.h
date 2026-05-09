@@ -38,7 +38,12 @@ class CurveNetDeformer3D : public MeshInstance3D {
 	// Cache of the rest-pose pipeline: halfedge mesh + sample-promoted
 	// CutMesh, plus the column ↔ input-handle mapping needed at runtime
 	// to pull per-frame sample positions from the user's Curve3D handles.
-	// Invalidated when the source mesh or source_path changes.
+	//
+	// The big perf win: every matrix in this struct depends only on the
+	// rest pose. We assemble them ONCE at bind time and the per-frame
+	// `apply_deformation` only computes RHS vectors + solves. That cuts
+	// the dominant dense-matMul cost (`Lₕ V`, `Vᵀ Lₕ V`) out of the hot
+	// loop entirely.
 	struct RestCache {
 		bool                                  valid       = false;
 		std::vector<curvenet::Vec3>           positions;        // rest mesh vertex positions
@@ -46,6 +51,12 @@ class CurveNetDeformer3D : public MeshInstance3D {
 		curvenet::cut_mesh::CutMesh           cut_mesh;         // sample-promoted
 		std::vector<curvenet::Vec3>           col_rest_pos;     // rest position per sample column
 		std::vector<std::pair<int, int>>      col_input_handle; // (curve_id, handle_idx) per column
+		// Pre-assembled rest-pose matrices (Phase B perf win #1).
+		std::vector<double>                   Lh;               // nh × nh cut-mesh Laplacian
+		std::vector<double>                   V;                // nh × nv halfedge → mesh-vertex map
+		std::vector<double>                   Vt;               // nv × nh transpose
+		std::vector<double>                   LhS;              // nh × nv cached Lₕ·V
+		std::vector<double>                   LhsM;             // nv × nv shared LHS Vᵀ·Lₕ·V
 		int                                   nc          = 0;  // number of sample columns
 		std::uint64_t                         source_hash = 0;
 	};

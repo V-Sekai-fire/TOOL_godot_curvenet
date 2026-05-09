@@ -4,9 +4,12 @@
 
 #include "curvenet/curvenet_builder.h"
 #include "curvenet/cut_mesh.h"
+#include "curvenet/cut_mesh_laplacian.h"
+#include "curvenet/dense_linalg.h"
 #include "curvenet/deform_solve.h"
 #include "curvenet/halfedge.h"
 #include "curvenet/halfedge_builder.h"
+#include "curvenet/harmonic_solve.h"
 #include "curvenet/surface_projection.h"
 #include "curvenet/vec3.h"
 
@@ -58,6 +61,11 @@ void CurveNetDeformer3D::invalidate_cache() {
 	rest_cache.cut_mesh = curvenet::cut_mesh::CutMesh{};
 	rest_cache.col_rest_pos.clear();
 	rest_cache.col_input_handle.clear();
+	rest_cache.Lh.clear();
+	rest_cache.V.clear();
+	rest_cache.Vt.clear();
+	rest_cache.LhS.clear();
+	rest_cache.LhsM.clear();
 	rest_cache.nc = 0;
 	rest_cache.source_hash = 0;
 }
@@ -233,28 +241,85 @@ void CurveNetDeformer3D::apply_deformation() {
 			col_set[col] = true;
 		}
 
+		// Pre-assemble the rest-pose matrices that the per-frame solve
+		// reuses unchanged. Each one depends only on positions + cut-mesh
+		// topology, so this work moves out of the hot loop.
+		rest_cache.Lh   = curvenet::cut_mesh_laplacian::assemble_lh(
+			rest_cache.cut_mesh, rest_cache.positions);
+		rest_cache.V    = curvenet::cut_mesh_laplacian::assemble_v(rest_cache.cut_mesh);
+		const std::size_t nh_assembled = rest_cache.cut_mesh.he_count();
+		const std::size_t nv_assembled = rest_cache.cut_mesh.vertex_count();
+		rest_cache.Vt   = curvenet::dense::transpose(nh_assembled, nv_assembled, rest_cache.V);
+		rest_cache.LhS  = curvenet::dense::mat_mul(nh_assembled, nh_assembled, nv_assembled,
+			rest_cache.Lh, rest_cache.V);
+		rest_cache.LhsM = curvenet::dense::mat_mul(nv_assembled, nh_assembled, nv_assembled,
+			rest_cache.Vt, rest_cache.LhS);
+
 		rest_cache.source_hash = hash_val;
 		rest_cache.valid = true;
 	}
 
 	const std::size_t nv = rest_cache.positions.size();
+	const std::size_t nh = rest_cache.cut_mesh.he_count();
 	const int nc = rest_cache.nc;
+
+	// Helper that emits the deformed PackedVector3Array as an ArrayMesh
+	// directly (bypasses SurfaceTool::generate_normals's vertex splits,
+	// preserves the source mesh's vertex count). Normals are computed
+	// by averaging incident triangle face normals per vertex.
+	auto emit_mesh = [&](const PackedVector3Array &deformed_vertices) {
+		PackedVector3Array normals;
+		normals.resize(deformed_vertices.size());
+		for (int i = 0; i < normals.size(); ++i) {
+			normals.set(i, Vector3(0.0f, 0.0f, 0.0f));
+		}
+		PackedInt32Array indices;
+		indices.resize(rest_cache.tri_indices.size());
+		for (std::size_t i = 0; i < rest_cache.tri_indices.size(); ++i) {
+			indices.set(static_cast<int>(i), rest_cache.tri_indices[i]);
+		}
+		// Accumulate face normals onto incident vertices.
+		for (std::size_t f = 0; f + 2 < rest_cache.tri_indices.size(); f += 3) {
+			const int a = rest_cache.tri_indices[f + 0];
+			const int b = rest_cache.tri_indices[f + 1];
+			const int c = rest_cache.tri_indices[f + 2];
+			if (a < 0 || b < 0 || c < 0) {
+				continue;
+			}
+			const Vector3 va = deformed_vertices[a];
+			const Vector3 vb = deformed_vertices[b];
+			const Vector3 vc = deformed_vertices[c];
+			const Vector3 fn = (vb - va).cross(vc - va);
+			normals.set(a, normals[a] + fn);
+			normals.set(b, normals[b] + fn);
+			normals.set(c, normals[c] + fn);
+		}
+		for (int i = 0; i < normals.size(); ++i) {
+			Vector3 n = normals[i];
+			const float len = n.length();
+			normals.set(i, len > 0.0f ? n / len : Vector3(0.0f, 1.0f, 0.0f));
+		}
+		Array arrays;
+		arrays.resize(Mesh::ARRAY_MAX);
+		arrays[Mesh::ARRAY_VERTEX] = deformed_vertices;
+		arrays[Mesh::ARRAY_NORMAL] = normals;
+		arrays[Mesh::ARRAY_INDEX]  = indices;
+		Ref<ArrayMesh> out_mesh;
+		out_mesh.instantiate();
+		out_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+		set_mesh(out_mesh);
+	};
 
 	if (nc == 0) {
 		// No curvenet samples — emit the source mesh unchanged.
-		Ref<SurfaceTool> st;
-		st.instantiate();
-		st->begin(Mesh::PRIMITIVE_TRIANGLES);
-		for (const curvenet::Vec3 &v : rest_cache.positions) {
-			st->add_vertex(Vector3(v.x, v.y, v.z));
+		PackedVector3Array verts;
+		verts.resize(static_cast<int>(nv));
+		for (std::size_t v = 0; v < nv; ++v) {
+			const curvenet::Vec3 &p = rest_cache.positions[v];
+			verts.set(static_cast<int>(v),
+				Vector3(static_cast<float>(p.x), static_cast<float>(p.y), static_cast<float>(p.z)));
 		}
-		for (std::size_t i = 0; i + 2 < rest_cache.tri_indices.size(); i += 3) {
-			st->add_index(rest_cache.tri_indices[i]);
-			st->add_index(rest_cache.tri_indices[i + 1]);
-			st->add_index(rest_cache.tri_indices[i + 2]);
-		}
-		st->generate_normals();
-		set_mesh(st->commit());
+		emit_mesh(verts);
 		return;
 	}
 
@@ -283,39 +348,75 @@ void CurveNetDeformer3D::apply_deformation() {
 	}
 
 	// `surface_projection::promote_vertex_samples` packs the column index
-	// into vertex_kind.curve_id with sample_idx = 0, so the deformer's
-	// sample-column packer just passes the curve_id through.
+	// into vertex_kind.curve_id with sample_idx = 0, so the sample-column
+	// packer just passes the curve_id through.
 	const auto sample_col = [](int curve_id, int /*sample_idx*/, bool /*side*/) -> int {
 		return curve_id;
 	};
 
-	const std::vector<double> Xv = curvenet::deform_solve::solve_deformation(
-		rest_cache.cut_mesh, rest_cache.positions, sample_col, Fc, Xc);
+	// Stage 1 (Eq. 6a): solve for Fv (per-vertex deformation gradients,
+	// 9 columns). Reuses cached Lh, V, Vt, LhsM.
+	const std::vector<double> CFc =
+		curvenet::harmonic_solve::compute_c_fc_matrix(
+			rest_cache.cut_mesh, sample_col, Fc, 9);
+	const std::vector<double> Lh_CFc =
+		curvenet::dense::mat_mul(nh, nh, 9, rest_cache.Lh, CFc);
+	const std::vector<double> Vt_Lh_CFc =
+		curvenet::dense::mat_mul(nv, nh, 9, rest_cache.Vt, Lh_CFc);
+	std::vector<double> rhs_a(nv * 9, 0.0);
+	for (std::size_t i = 0; i < nv * 9; ++i) {
+		rhs_a[i] = -Vt_Lh_CFc[i];
+	}
+	const std::vector<double> Fv = curvenet::dense::solve_multi(nv, 9, rest_cache.LhsM, rhs_a);
 
-	// Emit the deformed mesh. Sample vertices come from Xc (the solver
-	// returns 0 for promoted slots — we overlay the sample target);
-	// non-sample vertices use Xv.
-	Ref<SurfaceTool> st;
-	st.instantiate();
-	st->begin(Mesh::PRIMITIVE_TRIANGLES);
+	// Bridge (Eq. 3 + per-face average): build F_f and y_h.
+	const std::vector<double> Fh =
+		curvenet::deform_solve::compute_fh(
+			rest_cache.cut_mesh, sample_col, Fv, Fc, 9);
+	const std::vector<double> Ff =
+		curvenet::deform_solve::average_over_faces(rest_cache.cut_mesh, Fh, 9);
+	const std::vector<double> yh =
+		curvenet::deform_solve::compute_yh(rest_cache.cut_mesh, rest_cache.positions, Ff);
+
+	// Stage 2 (Eq. 6b): solve for Xv (vertex positions, 3 columns).
+	const std::vector<double> CXc =
+		curvenet::harmonic_solve::compute_c_fc_matrix(
+			rest_cache.cut_mesh, sample_col, Xc, 3);
+	std::vector<double> diff(nh * 3, 0.0);
+	for (std::size_t i = 0; i < nh * 3; ++i) {
+		diff[i] = CXc[i] - yh[i];
+	}
+	const std::vector<double> Lh_diff =
+		curvenet::dense::mat_mul(nh, nh, 3, rest_cache.Lh, diff);
+	const std::vector<double> Vt_Lh_diff =
+		curvenet::dense::mat_mul(nv, nh, 3, rest_cache.Vt, Lh_diff);
+	std::vector<double> rhs_b(nv * 3, 0.0);
+	for (std::size_t i = 0; i < nv * 3; ++i) {
+		rhs_b[i] = -Vt_Lh_diff[i];
+	}
+	const std::vector<double> Xv = curvenet::dense::solve_multi(nv, 3, rest_cache.LhsM, rhs_b);
+
+	// Emit the deformed mesh — bypassing SurfaceTool's generate_normals
+	// vertex splits keeps the original vertex count and preserves index
+	// correspondence with the cut-mesh.
+	PackedVector3Array verts;
+	verts.resize(static_cast<int>(nv));
 	for (std::size_t v = 0; v < nv; ++v) {
 		const auto &kind = rest_cache.cut_mesh.vertex_kind[v];
 		if (kind.tag == curvenet::cut_mesh::CutVertexKindTag::sample) {
 			const int col = kind.curve_id;
-			st->add_vertex(Vector3(
-				Xc[col * 3 + 0], Xc[col * 3 + 1], Xc[col * 3 + 2]));
+			verts.set(static_cast<int>(v), Vector3(
+				static_cast<float>(Xc[col * 3 + 0]),
+				static_cast<float>(Xc[col * 3 + 1]),
+				static_cast<float>(Xc[col * 3 + 2])));
 		} else {
-			st->add_vertex(Vector3(
-				Xv[v * 3 + 0], Xv[v * 3 + 1], Xv[v * 3 + 2]));
+			verts.set(static_cast<int>(v), Vector3(
+				static_cast<float>(Xv[v * 3 + 0]),
+				static_cast<float>(Xv[v * 3 + 1]),
+				static_cast<float>(Xv[v * 3 + 2])));
 		}
 	}
-	for (std::size_t i = 0; i + 2 < rest_cache.tri_indices.size(); i += 3) {
-		st->add_index(rest_cache.tri_indices[i]);
-		st->add_index(rest_cache.tri_indices[i + 1]);
-		st->add_index(rest_cache.tri_indices[i + 2]);
-	}
-	st->generate_normals();
-	set_mesh(st->commit());
+	emit_mesh(verts);
 
 	UtilityFunctions::print(
 		"CurveNetDeformer3D: ",
