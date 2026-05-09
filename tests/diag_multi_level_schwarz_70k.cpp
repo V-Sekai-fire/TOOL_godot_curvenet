@@ -17,6 +17,7 @@
 #include "curvenet/cut_mesh.h"
 #include "curvenet/cut_mesh_laplacian.h"
 #include "curvenet/halfedge_builder.h"
+#include "curvenet/heavy_edge_matching.h"
 #include "curvenet/multi_level_schwarz.h"
 #include "curvenet/sparse_linalg.h"
 #include "curvenet/two_level_schwarz.h"
@@ -38,6 +39,7 @@
 using curvenet::Vec3;
 namespace cm  = curvenet::cut_mesh;
 namespace cml = curvenet::cut_mesh_laplacian;
+namespace hem = curvenet::heavy_edge_matching;
 namespace mls = curvenet::multi_level_schwarz;
 namespace sp  = curvenet::sparse;
 namespace tls = curvenet::two_level_schwarz;
@@ -173,66 +175,11 @@ double max_abs_residual(const sp::SparseMatrixCSR &A,
     return m;
 }
 
-// Generic principal-axis aggregator: clusters n points into k
-// buckets along the longest spatial extent. Returns a cmap of length
-// n with values in [0, k). Works in any dimension that fits Vec3.
-std::vector<int> aggregate_by_longest_axis(
-        const std::vector<Vec3> &pts, std::size_t k_buckets) {
-    const std::size_t n = pts.size();
-    if (k_buckets == 0 || n == 0) return {};
-    if (k_buckets >= n) {
-        std::vector<int> cmap(n);
-        for (std::size_t i = 0; i < n; ++i) cmap[i] = static_cast<int>(i);
-        return cmap;
-    }
-    Vec3 lo{ 1e300, 1e300, 1e300 }, hi{ -1e300, -1e300, -1e300 };
-    for (const auto &p : pts) {
-        lo.x = std::min(lo.x, p.x); lo.y = std::min(lo.y, p.y); lo.z = std::min(lo.z, p.z);
-        hi.x = std::max(hi.x, p.x); hi.y = std::max(hi.y, p.y); hi.z = std::max(hi.z, p.z);
-    }
-    const double sx = hi.x - lo.x, sy = hi.y - lo.y, sz = hi.z - lo.z;
-    const int axis = (sx >= sy && sx >= sz) ? 0 : (sy >= sz ? 1 : 2);
-    std::vector<double> proj(n);
-    for (std::size_t i = 0; i < n; ++i) {
-        proj[i] = axis == 0 ? pts[i].x : (axis == 1 ? pts[i].y : pts[i].z);
-    }
-    std::vector<std::size_t> idx(n);
-    for (std::size_t i = 0; i < n; ++i) idx[i] = i;
-    std::sort(idx.begin(), idx.end(),
-                 [&](std::size_t a, std::size_t b) { return proj[a] < proj[b]; });
-    std::vector<int> cmap(n);
-    for (std::size_t r = 0; r < n; ++r) {
-        const std::size_t bucket = (r * k_buckets) / n;
-        cmap[idx[r]] = static_cast<int>(bucket);
-    }
-    return cmap;
-}
-
 struct MultiLevel {
     std::vector<std::vector<int>>     cmaps;     // length L
     std::vector<sp::SparseMatrixCSR> mats;       // length L+1
     std::vector<std::size_t>           sizes;     // length L+1
 };
-
-// Given level-i positions, aggregate to level-(i+1) by applying a
-// cmap (sum-and-divide centroid). Used to produce level-i+2
-// aggregations from level-i+1 positions.
-std::vector<Vec3> centroids_after_cmap(const std::vector<Vec3> &pts,
-                                          const std::vector<int> &cmap,
-                                          std::size_t k_coarse) {
-    std::vector<Vec3>   sum(k_coarse, { 0.0, 0.0, 0.0 });
-    std::vector<double> cnt(k_coarse, 0.0);
-    for (std::size_t i = 0; i < pts.size(); ++i) {
-        const int c = cmap[i];
-        sum[c].x += pts[i].x; sum[c].y += pts[i].y; sum[c].z += pts[i].z;
-        cnt[c] += 1.0;
-    }
-    for (std::size_t i = 0; i < k_coarse; ++i) {
-        const double s = cnt[i] > 0.0 ? 1.0 / cnt[i] : 0.0;
-        sum[i].x *= s; sum[i].y *= s; sum[i].z *= s;
-    }
-    return sum;
-}
 
 void jacobi_smooth(const sp::SparseMatrixCSR &A, const std::vector<double> &b,
                    std::vector<double> &x, std::size_t n_sweeps,
@@ -291,11 +238,9 @@ std::vector<double> v_cycle(const MultiLevel &ml,
 int main(int argc, char **argv) {
     (void)argc; (void)argv;
     const double T_CAP_MS = 90000.0;
-    // Generic hierarchy parameters: keep coarsening until the top
-    // level has < TOP_THRESHOLD nodes. COARSEN_RATIO controls how
-    // aggressively we shrink each level above level 1.
+    // Hierarchy parameters: keep coarsening until the top level has
+    // < TOP_THRESHOLD nodes. HEM gives 2:1 coarsening per pass.
     const std::size_t TOP_THRESHOLD = 16;
-    const std::size_t COARSEN_RATIO = 4;
 
     std::vector<Vec3> positions;
     positions.reserve(mire_body_70k::n_verts);
@@ -382,22 +327,55 @@ int main(int argc, char **argv) {
     std::vector<int> cmap0(nv);
     for (std::size_t i = 0; i < nv; ++i) cmap0[i] = owner[i];
 
-    // Build the multilevel hierarchy generically: keep aggregating
-    // by principal-axis bucketing until size <= TOP_THRESHOLD.
+    // Build meshlet adjacency graph from the triangle list:
+    // meshlets c1 and c2 are adjacent iff some triangle has
+    // vertices owned by both.
+    std::vector<std::unordered_set<int>> meshlet_nbr_sets(n1);
+    for (std::size_t t = 0; t + 2 < tris.size(); t += 3) {
+        const int o0 = owner[tris[t + 0]];
+        const int o1 = owner[tris[t + 1]];
+        const int o2 = owner[tris[t + 2]];
+        if (o0 != o1) { meshlet_nbr_sets[o0].insert(o1); meshlet_nbr_sets[o1].insert(o0); }
+        if (o1 != o2) { meshlet_nbr_sets[o1].insert(o2); meshlet_nbr_sets[o2].insert(o1); }
+        if (o0 != o2) { meshlet_nbr_sets[o0].insert(o2); meshlet_nbr_sets[o2].insert(o0); }
+    }
+    hem::Adjacency meshlet_adj(n1);
+    for (std::size_t i = 0; i < n1; ++i) {
+        meshlet_adj[i].assign(meshlet_nbr_sets[i].begin(),
+                              meshlet_nbr_sets[i].end());
+        std::sort(meshlet_adj[i].begin(), meshlet_adj[i].end());
+    }
+
+    // Build the multilevel hierarchy: keep applying heavy-edge
+    // matching until the top level is below TOP_THRESHOLD nodes.
+    // HEM gives 2:1 coarsening per pass with always-connected
+    // aggregates — the fix for the loop-8 stall on 81k.
     MultiLevel ml;
     ml.cmaps.push_back(cmap0);
     ml.sizes.push_back(nv);
     ml.sizes.push_back(n1);
 
-    std::vector<Vec3> centroids = centroids_after_cmap(positions, cmap0, n1);
+    hem::Adjacency cur_adj = meshlet_adj;
     while (ml.sizes.back() > TOP_THRESHOLD) {
-        const std::size_t n_cur = ml.sizes.back();
-        const std::size_t n_next = std::max<std::size_t>(2, n_cur / COARSEN_RATIO);
-        const std::vector<int> cmap_up =
-            aggregate_by_longest_axis(centroids, n_next);
-        ml.cmaps.push_back(cmap_up);
-        ml.sizes.push_back(n_next);
-        centroids = centroids_after_cmap(centroids, cmap_up, n_next);
+        const hem::MatchResult step = hem::hem_match(cur_adj);
+        ml.cmaps.push_back(step.cmap);
+        ml.sizes.push_back(step.num_coarse);
+        // Coarsen adjacency for the next pass.
+        std::vector<std::unordered_set<int>> sets(step.num_coarse);
+        for (std::size_t i = 0; i < cur_adj.size(); ++i) {
+            const int ci = step.cmap[i];
+            for (int j : cur_adj[i]) {
+                const int cj = step.cmap[j];
+                if (ci != cj) sets[ci].insert(cj);
+            }
+        }
+        hem::Adjacency next_adj(step.num_coarse);
+        for (std::size_t c = 0; c < step.num_coarse; ++c) {
+            next_adj[c].assign(sets[c].begin(), sets[c].end());
+            std::sort(next_adj[c].begin(), next_adj[c].end());
+        }
+        cur_adj = std::move(next_adj);
+        if (step.num_coarse <= 2) break;
     }
     std::printf("hierarchy: ");
     for (std::size_t s : ml.sizes) std::printf("%zu ", s);

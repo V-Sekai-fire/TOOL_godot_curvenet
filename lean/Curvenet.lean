@@ -32,3 +32,4 @@ import Curvenet.SegmentGradient
 import Curvenet.ChebyshevAccel
 import Curvenet.TwoLevelSchwarz
 import Curvenet.MultiLevelSchwarz
+import Curvenet.HeavyEdgeMatching

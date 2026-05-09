@@ -203,37 +203,47 @@ body that's 2.1e-7. The cot Laplacian on the resulting mesh has
 finite entries (off-diag dynamic range 10¹¹ vs `±∞` before) and CG
 converges.
 
-## Multi-level Schwarz (loop 8, generic)
+## Multi-level Schwarz (loop 8 + loop 100)
 
 Generic multilevel V-cycle on top of the meshlet Schwarz smoother.
-Hierarchy auto-built by recursive principal-axis bucketing of
-centroids until top-level size is below `TOP_THRESHOLD = 16`,
-with `COARSEN_RATIO = 4` between levels. Galerkin matrices
+Hierarchy auto-built until top-level size is below
+`TOP_THRESHOLD = 16`. Galerkin matrices
 `A_{i+1} = R_i A_i R_i^T` chained from the fine matrix.
 
-| problem  | hierarchy                 | result                                                    |
-|----------|---------------------------|-----------------------------------------------------------|
-| 5k       | 5485 → 23 → 5             | converged in **169 outer iters / 2.4 s**                   |
-| 81k      | 81613 → 368 → 92 → 23 → 5 | did NOT converge, plateaus at residual 3.73 after 19 iters |
+Two aggregation strategies tried on the level-1 -> top chain:
 
-5k result: marginal vs 2-level (193 iters), worse than 1-level
-Chebyshev-Schwarz (137 iters). Adding levels did not help.
+* **Principal-axis bucketing** (loop 8): sort centroids along the
+  longest spatial extent, slice into K equal buckets per level.
+  4:1 coarsening per level.
+* **Heavy-edge matching (HEM)** (loop 100, Karypis-Kumar 1998):
+  walk node ids in order, pair each unmatched node with its first
+  unmatched neighbor, leave the rest as singletons. Aggregates are
+  always-connected by construction. 2:1 coarsening per pass.
 
-81k stall: identical plateau as 2-level. Adding levels did not
-change the dynamics. The bottleneck is **aggregation quality**,
-not level count: principal-axis bucketing produces
-non-spatially-contiguous super-aggregates (a single z-bucket on a
-T-pose body slices through head, both arms, and torso
-simultaneously), so the Galerkin coarse matrix has
-near-disconnected blocks and the coarse correction is ineffective
-on the medium-frequency error around meshlet boundaries.
+| problem  | strategy            | hierarchy                                   | result                                          |
+|----------|---------------------|---------------------------------------------|-------------------------------------------------|
+| 5k       | principal-axis      | 5485 → 23 → 5                               | converged 169 iters / 2.4 s                     |
+| 5k       | HEM                 | 5485 → 23 → 12                              | converged 168 iters / 2.4 s                     |
+| 81k      | principal-axis      | 81613 → 368 → 92 → 23 → 5                   | stalls at residual ~3.7 after iter 19           |
+| 81k      | HEM                 | 81613 → 368 → 186 → 94 → 48 → 26 → 13      | stalls at residual ~3.7 after iter 19           |
 
-Next loop: replace the principal-axis aggregator with a
-**connectivity-aware** one — either BFS-greedy aggregation over
-the level-1 meshlet adjacency graph, or k-means on level-1
-centroids. The multilevel framework (`Hierarchy`,
-`restrict_through`, `prolong_through`, generic V-cycle) is correct
-and reusable; only the cmap-construction step needs to change.
+Loop-100 finding: **aggregation method is not the bottleneck.**
+Both strategies plateau at the same residual on 81k despite very
+different aggregate topology (HEM aggregates are always connected,
+principal-axis are often disconnected). This rules out the
+loop-8 hypothesis.
+
+Updated hypothesis: the 81k system is ill-conditioned in the
+constant null-space mode. The mollified Laplacian
+`V^T·L_h·V` has a 1D constant kernel; without a Dirichlet anchor
+the consistency condition `b ⊥ ker` is satisfied by construction
+(b = A·y_seed) but Krylov drift accumulates kernel-mode error at
+scale. The relative residual at the plateau is ~6e-3 on 81k vs
+~2e-9 on 5k — exactly what kernel-mode pollution looks like.
+
+Next loop: pin one DOF as Dirichlet (or project out the constant
+mode at every V-cycle correction) and re-run. The multilevel +
+HEM infrastructure stays as-is.
 
 ## Next steps
 
