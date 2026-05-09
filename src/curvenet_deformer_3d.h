@@ -7,7 +7,7 @@
 
 #include <godot_cpp/classes/curve3d.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
-#include <godot_cpp/classes/node_path.hpp>
+#include <godot_cpp/variant/node_path.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 
 namespace godot {

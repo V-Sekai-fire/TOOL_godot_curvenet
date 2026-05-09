@@ -982,7 +982,9 @@ namespace lemon {
           typename Parent::OutArcIt(*this, node) == INVALID) {
         return;
       }
+      #ifndef LEMON_NO_EXCEPTIONS
       throw typename NodesImplBase::Notifier::ImmediateDetach();
+      #endif
     }
 
     void clearNodes() {
@@ -1005,24 +1007,36 @@ namespace lemon {
     protected:
 
       virtual void erase(const Node& node) {
+        #ifndef LEMON_NO_EXCEPTIONS
         try {
           _arcset.eraseNode(node);
           Parent::erase(node);
-        } catch (const typename NodesImplBase::Notifier::ImmediateDetach&) {
+        } catch (...) {
           Parent::clear();
           throw;
         }
+        #else
+          _arcset.eraseNode(node);
+          Parent::erase(node);
+        #endif
       }
       virtual void erase(const std::vector<Node>& nodes) {
+        #ifndef LEMON_NO_EXCEPTIONS
         try {
           for (int i = 0; i < int(nodes.size()); ++i) {
             _arcset.eraseNode(nodes[i]);
           }
           Parent::erase(nodes);
-        } catch (const typename NodesImplBase::Notifier::ImmediateDetach&) {
+        } catch (...) {
           Parent::clear();
           throw;
         }
+        #else
+          for (int i = 0; i < int(nodes.size()); ++i) {
+            _arcset.eraseNode(nodes[i]);
+          }
+          Parent::erase(nodes);
+        #endif
       }
       virtual void clear() {
         _arcset.clearNodes();
@@ -1333,7 +1347,9 @@ namespace lemon {
       if (typename Parent::IncEdgeIt(*this, node) == INVALID) {
         return;
       }
+      #ifndef LEMON_NO_EXCEPTIONS
       throw typename NodesImplBase::Notifier::ImmediateDetach();
+      #endif
     }
 
     void clearNodes() {
@@ -1356,24 +1372,36 @@ namespace lemon {
     protected:
 
       virtual void erase(const Node& node) {
+        #ifndef LEMON_NO_EXCEPTIONS
         try {
           _arcset.eraseNode(node);
           Parent::erase(node);
-        } catch (const typename NodesImplBase::Notifier::ImmediateDetach&) {
+        } catch (...) {
           Parent::clear();
           throw;
         }
+        #else
+          _arcset.eraseNode(node);
+          Parent::erase(node);
+        #endif
       }
       virtual void erase(const std::vector<Node>& nodes) {
+        #ifndef LEMON_NO_EXCEPTIONS
         try {
           for (int i = 0; i < int(nodes.size()); ++i) {
             _arcset.eraseNode(nodes[i]);
           }
           Parent::erase(nodes);
-        } catch (const typename NodesImplBase::Notifier::ImmediateDetach&) {
+        } catch (...) {
           Parent::clear();
           throw;
         }
+        #else
+          for (int i = 0; i < int(nodes.size()); ++i) {
+            _arcset.eraseNode(nodes[i]);
+          }
+          Parent::erase(nodes);
+        #endif
       }
       virtual void clear() {
         _arcset.clearNodes();

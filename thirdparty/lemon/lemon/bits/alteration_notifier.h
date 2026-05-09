@@ -356,6 +356,7 @@ namespace lemon {
     // the container.
     void add(const Item& item) {
       typename Observers::reverse_iterator it;
+      #ifndef LEMON_NO_EXCEPTIONS
       try {
         for (it = _observers.rbegin(); it != _observers.rend(); ++it) {
           (*it)->add(item);
@@ -367,6 +368,11 @@ namespace lemon {
         }
         throw;
       }
+      #else
+        for (it = _observers.rbegin(); it != _observers.rend(); ++it) {
+          (*it)->add(item);
+        }
+      #endif
     }
 
     // \brief Notifies all the registed observers about more item added to
@@ -376,6 +382,7 @@ namespace lemon {
     // the container.
     void add(const std::vector<Item>& items) {
       typename Observers::reverse_iterator it;
+      #ifndef LEMON_NO_EXCEPTIONS
       try {
         for (it = _observers.rbegin(); it != _observers.rend(); ++it) {
           (*it)->add(items);
@@ -387,6 +394,11 @@ namespace lemon {
         }
         throw;
       }
+      #else
+        for (it = _observers.rbegin(); it != _observers.rend(); ++it) {
+          (*it)->add(items);
+        }
+      #endif
     }
 
     // \brief Notifies all the registed observers about an item erased from
@@ -397,14 +409,19 @@ namespace lemon {
     void erase(const Item& item) throw() {
       typename Observers::iterator it = _observers.begin();
       while (it != _observers.end()) {
+        #ifndef LEMON_NO_EXCEPTIONS
         try {
           (*it)->erase(item);
           ++it;
-        } catch (const ImmediateDetach&) {
+        } catch (...) {
           (*it)->_index = _observers.end();
           (*it)->_notifier = 0;
           it = _observers.erase(it);
         }
+        #else
+          (*it)->erase(item);
+          ++it;
+        #endif
       }
     }
 
@@ -416,14 +433,19 @@ namespace lemon {
     void erase(const std::vector<Item>& items) {
       typename Observers::iterator it = _observers.begin();
       while (it != _observers.end()) {
+        #ifndef LEMON_NO_EXCEPTIONS
         try {
           (*it)->erase(items);
           ++it;
-        } catch (const ImmediateDetach&) {
+        } catch (...) {
           (*it)->_index = _observers.end();
           (*it)->_notifier = 0;
           it = _observers.erase(it);
         }
+        #else
+          (*it)->erase(items);
+          ++it;
+        #endif
       }
     }
 
@@ -434,6 +456,7 @@ namespace lemon {
     // from an empty container.
     void build() {
       typename Observers::reverse_iterator it;
+      #ifndef LEMON_NO_EXCEPTIONS
       try {
         for (it = _observers.rbegin(); it != _observers.rend(); ++it) {
           (*it)->build();
@@ -445,6 +468,11 @@ namespace lemon {
         }
         throw;
       }
+      #else
+        for (it = _observers.rbegin(); it != _observers.rend(); ++it) {
+          (*it)->build();
+        }
+      #endif
     }
 
     // \brief Notifies all the registed observers about all items are
@@ -455,14 +483,19 @@ namespace lemon {
     void clear() {
       typename Observers::iterator it = _observers.begin();
       while (it != _observers.end()) {
+        #ifndef LEMON_NO_EXCEPTIONS
         try {
           (*it)->clear();
           ++it;
-        } catch (const ImmediateDetach&) {
+        } catch (...) {
           (*it)->_index = _observers.end();
           (*it)->_notifier = 0;
           it = _observers.erase(it);
         }
+        #else
+          (*it)->clear();
+          ++it;
+        #endif
       }
     }
   };

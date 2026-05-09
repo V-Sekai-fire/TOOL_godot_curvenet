@@ -51,6 +51,11 @@ env.Alias("compiledb", compilation_db)
 env = SConscript("thirdparty/godot-cpp/SConstruct", {"env": env, "customs": customs})
 
 env.Append(CPPPATH=["src/", "thirdparty/lemon/"])
+# godot-cpp builds with -fno-exceptions; LEMON's alteration_notifier and edge_set
+# use try/throw for listener-rollback on partial failure. Our usage never triggers
+# those paths, so we patch the headers (see thirdparty/lemon/patches/no_exceptions.patch)
+# to gate the exception code with #ifndef LEMON_NO_EXCEPTIONS, then define it here.
+env.Append(CPPDEFINES=["LEMON_NO_EXCEPTIONS"])
 # Curvenet math + tris_to_quads converter live under src/curvenet/.
 # Top-level src/*.cpp is the GDExtension binding layer (register_types, node bindings).
 sources = Glob("src/*.cpp") + Glob("src/curvenet/*.cpp")

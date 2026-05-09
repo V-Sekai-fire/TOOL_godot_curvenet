@@ -684,7 +684,9 @@ namespace lemon {
         if (it == added_nodes.end()) {
           clear();
           arc_observer_proxy.detach();
+          #ifndef LEMON_NO_EXCEPTIONS
           throw NodeNotifier::ImmediateDetach();
+          #endif
         } else {
           added_nodes.erase(it);
         }
@@ -699,7 +701,9 @@ namespace lemon {
         if (it == added_arcs.end()) {
           clear();
           node_observer_proxy.detach();
+          #ifndef LEMON_NO_EXCEPTIONS
           throw ArcNotifier::ImmediateDetach();
+          #endif
         } else {
           added_arcs.erase(it);
         }
@@ -1496,7 +1500,9 @@ namespace lemon {
         if (it == added_nodes.end()) {
           clear();
           edge_observer_proxy.detach();
+          #ifndef LEMON_NO_EXCEPTIONS
           throw NodeNotifier::ImmediateDetach();
+          #endif
         } else {
           added_nodes.erase(it);
         }
@@ -1511,7 +1517,9 @@ namespace lemon {
         if (it == added_edges.end()) {
           clear();
           node_observer_proxy.detach();
+          #ifndef LEMON_NO_EXCEPTIONS
           throw EdgeNotifier::ImmediateDetach();
+          #endif
         } else {
           added_edges.erase(it);
         }
@@ -2403,7 +2411,9 @@ namespace lemon {
         if (it == added_nodes.end()) {
           clear();
           edge_observer_proxy.detach();
+          #ifndef LEMON_NO_EXCEPTIONS
           throw NodeNotifier::ImmediateDetach();
+          #endif
         } else {
           added_nodes.erase(it);
         }
@@ -2418,7 +2428,9 @@ namespace lemon {
         if (it == added_edges.end()) {
           clear();
           node_observer_proxy.detach();
+          #ifndef LEMON_NO_EXCEPTIONS
           throw EdgeNotifier::ImmediateDetach();
+          #endif
         } else {
           added_edges.erase(it);
         }

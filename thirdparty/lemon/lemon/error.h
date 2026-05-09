@@ -98,23 +98,17 @@ namespace lemon {
 
     /// Set the error message
     void message(const char *message) throw() {
-      try {
-        _message = message;
-      } catch (...) {}
+      _message = message;  // try/catch stripped (LEMON_NO_EXCEPTIONS)
     }
 
     /// Set the error message
     void message(const std::string& message) throw() {
-      try {
-        _message = message;
-      } catch (...) {}
+      _message = message;  // try/catch stripped (LEMON_NO_EXCEPTIONS)
     }
 
     /// Set the file name
     void file(const std::string &file) throw() {
-      try {
-        _file = file;
-      } catch (...) {}
+      _file = file;  // try/catch stripped (LEMON_NO_EXCEPTIONS)
     }
 
     /// Returns the error message
@@ -134,7 +128,7 @@ namespace lemon {
     /// Returns a short error message which contains the message and the
     /// file name.
     virtual const char* what() const throw() {
-      try {
+      { // try/catch stripped
         _what.clear();
         std::ostringstream oss;
         oss << "lemon:IoError" << ": ";
@@ -144,7 +138,6 @@ namespace lemon {
         }
         _what = oss.str();
       }
-      catch (...) {}
       if (!_what.empty()) return _what.c_str();
       else return "lemon:IoError";
     }
@@ -207,23 +200,17 @@ namespace lemon {
 
     /// Set the error message
     void message(const char *message) throw() {
-      try {
-        _message = message;
-      } catch (...) {}
+      _message = message;  // try/catch stripped (LEMON_NO_EXCEPTIONS)
     }
 
     /// Set the error message
     void message(const std::string& message) throw() {
-      try {
-        _message = message;
-      } catch (...) {}
+      _message = message;  // try/catch stripped (LEMON_NO_EXCEPTIONS)
     }
 
     /// Set the file name
     void file(const std::string &file) throw() {
-      try {
-        _file = file;
-      } catch (...) {}
+      _file = file;  // try/catch stripped (LEMON_NO_EXCEPTIONS)
     }
 
     /// \brief Returns the line number
@@ -248,7 +235,7 @@ namespace lemon {
     /// Returns a short error message which contains the message, the
     /// file name and the line number.
     virtual const char* what() const throw() {
-      try {
+      { // try/catch stripped
         _what.clear();
         std::ostringstream oss;
         oss << "lemon:FormatError" << ": ";
@@ -262,7 +249,6 @@ namespace lemon {
         }
         _what = oss.str();
       }
-      catch (...) {}
       if (!_what.empty()) return _what.c_str();
       else return "lemon:FormatError";
     }
