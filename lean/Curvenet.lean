@@ -22,3 +22,4 @@ import Curvenet.MeanValue
 import Curvenet.Halfedge
 import Curvenet.PolygonLaplacian
 import Curvenet.CutMesh
+import Curvenet.ScaledFrames
