@@ -3,10 +3,12 @@
 #ifndef CURVENET_DEFORMER_3D_H
 #define CURVENET_DEFORMER_3D_H
 
-#include "curvenet/curvenet.h"
-#include "curvenet/tris_to_quads.h"
+#include "curvenet/cut_mesh.h"
+#include "curvenet/halfedge.h"
+#include "curvenet/vec3.h"
 
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 #include <godot_cpp/classes/curve3d.hpp>
@@ -33,15 +35,19 @@ class CurveNetDeformer3D : public MeshInstance3D {
 	double length_tiebreak = 0.1;
 	bool deformation_active = false;
 
-	// Cache of the rest-pose pipeline: tris_to_quads + bind_polymesh outputs.
-	// Invalidated when source mesh, source_path, or length_tiebreak changes.
+	// Cache of the rest-pose pipeline: halfedge mesh + sample-promoted
+	// CutMesh, plus the column ↔ input-handle mapping needed at runtime
+	// to pull per-frame sample positions from the user's Curve3D handles.
+	// Invalidated when the source mesh or source_path changes.
 	struct RestCache {
-		bool valid = false;
-		curvenet::PolyMesh poly;
-		std::vector<curvenet::BoundVertex> bindings;
-		// Hash of the source ArrayMesh's vertex/index data so we can detect
-		// edits without recomputing every frame.
-		uint64_t source_hash = 0;
+		bool                                  valid       = false;
+		std::vector<curvenet::Vec3>           positions;        // rest mesh vertex positions
+		std::vector<int>                      tri_indices;      // flat index list, 3 ints/face
+		curvenet::cut_mesh::CutMesh           cut_mesh;         // sample-promoted
+		std::vector<curvenet::Vec3>           col_rest_pos;     // rest position per sample column
+		std::vector<std::pair<int, int>>      col_input_handle; // (curve_id, handle_idx) per column
+		int                                   nc          = 0;  // number of sample columns
+		std::uint64_t                         source_hash = 0;
 	};
 	mutable RestCache rest_cache;
 

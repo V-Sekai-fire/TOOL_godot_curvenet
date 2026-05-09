@@ -2,10 +2,13 @@
 // SPDX-License-Identifier: MIT
 #include "curvenet_deformer_3d.h"
 
-#include "curvenet/binding.h"
-#include "curvenet/curvenet.h"
-#include "curvenet/profile_curve.h"
-#include "curvenet/tris_to_quads.h"
+#include "curvenet/curvenet_builder.h"
+#include "curvenet/cut_mesh.h"
+#include "curvenet/deform_solve.h"
+#include "curvenet/halfedge.h"
+#include "curvenet/halfedge_builder.h"
+#include "curvenet/surface_projection.h"
+#include "curvenet/vec3.h"
 
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/curve3d.hpp>
@@ -18,33 +21,6 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 namespace godot {
-
-// Local alias to disambiguate from godot::Vector3 in the tri-mesh push_back below.
-using Vec3_t = curvenet::Vec3;
-
-namespace {
-
-// Convert a Godot Curve3D (point_position + relative point_in/point_out)
-// into our pure-math closed-loop ProfileCurve.
-curvenet::ProfileCurve to_profile_curve(const Ref<Curve3D> &c) {
-	std::vector<curvenet::CurveHandle> handles;
-	if (c.is_null()) {
-		return curvenet::ProfileCurve{};
-	}
-	const int n = c->get_point_count();
-	handles.reserve(n);
-	for (int i = 0; i < n; ++i) {
-		Vector3 p = c->get_point_position(i);
-		Vector3 in_off = c->get_point_in(i);
-		Vector3 out_off = c->get_point_out(i);
-		handles.push_back({ { p.x, p.y, p.z },
-				{ in_off.x, in_off.y, in_off.z },
-				{ out_off.x, out_off.y, out_off.z } });
-	}
-	return curvenet::profile_from_handles(handles);
-}
-
-} // namespace
 
 void CurveNetDeformer3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_source_path", "path"), &CurveNetDeformer3D::set_source_path);
@@ -75,8 +51,12 @@ void CurveNetDeformer3D::_bind_methods() {
 
 void CurveNetDeformer3D::invalidate_cache() {
 	rest_cache.valid = false;
-	rest_cache.poly = curvenet::PolyMesh{};
-	rest_cache.bindings.clear();
+	rest_cache.positions.clear();
+	rest_cache.tri_indices.clear();
+	rest_cache.cut_mesh = curvenet::cut_mesh::CutMesh{};
+	rest_cache.col_rest_pos.clear();
+	rest_cache.col_input_handle.clear();
+	rest_cache.nc = 0;
 	rest_cache.source_hash = 0;
 }
 
@@ -140,206 +120,226 @@ void CurveNetDeformer3D::apply_deformation() {
 		return;
 	}
 
-	// Hash the source mesh's vertex+index data so we can detect edits without
-	// re-running tri->quad each call. RID is stable per Mesh resource so we
-	// fold it together with the surface count and per-surface array sizes.
-	uint64_t hash_val = static_cast<uint64_t>(mesh->get_rid().get_id());
-	hash_val = hash_val * 1099511628211ULL + static_cast<uint64_t>(mesh->get_surface_count());
+	// Hash source-mesh vertex+index data + profile_curves count so we can
+	// detect authoring edits and rebuild the rest-pose cache lazily.
+	std::uint64_t hash_val = static_cast<std::uint64_t>(mesh->get_rid().get_id());
+	hash_val = hash_val * 1099511628211ULL + static_cast<std::uint64_t>(mesh->get_surface_count());
 	for (int s = 0; s < mesh->get_surface_count(); ++s) {
 		Array arrays = mesh->surface_get_arrays(s);
 		PackedVector3Array verts = arrays[Mesh::ARRAY_VERTEX];
 		PackedInt32Array indices = arrays[Mesh::ARRAY_INDEX];
-		hash_val = hash_val * 1099511628211ULL + static_cast<uint64_t>(verts.size());
-		hash_val = hash_val * 1099511628211ULL + static_cast<uint64_t>(indices.size());
+		hash_val = hash_val * 1099511628211ULL + static_cast<std::uint64_t>(verts.size());
+		hash_val = hash_val * 1099511628211ULL + static_cast<std::uint64_t>(indices.size());
 	}
+	hash_val = hash_val * 1099511628211ULL + static_cast<std::uint64_t>(profile_curves.size());
 
-	if (rest_cache.valid && rest_cache.source_hash == hash_val) {
-		// Rest-pose pipeline (tri->quad + bind) is cached; skip ahead to the
-		// build-curves-and-deform path.
-		goto rest_cache_hit;
-	}
-
-	{
-	curvenet::TriMesh tri;
-	for (int s = 0; s < mesh->get_surface_count(); ++s) {
-		Array arrays = mesh->surface_get_arrays(s);
-		PackedVector3Array verts = arrays[Mesh::ARRAY_VERTEX];
-		PackedInt32Array indices = arrays[Mesh::ARRAY_INDEX];
-		const int v_offset = static_cast<int>(tri.vertices.size());
-		for (int i = 0; i < verts.size(); ++i) {
-			Vector3 v = verts[i];
-			tri.vertices.push_back({ v.x, v.y, v.z });
-		}
-		// If indices are present use them; otherwise tris are sequential.
-		if (indices.size() > 0) {
-			for (int i = 0; i + 2 < indices.size(); i += 3) {
-				tri.triangles.push_back({ v_offset + indices[i],
-						v_offset + indices[i + 1],
-						v_offset + indices[i + 2] });
+	if (!rest_cache.valid || rest_cache.source_hash != hash_val) {
+		// Rebuild rest-pose: extract triangles + positions, build halfedge
+		// mesh, build curvenet from profile_curves, project knots to mesh
+		// vertices, promote them to samples in a fresh CutMesh.
+		rest_cache.positions.clear();
+		rest_cache.tri_indices.clear();
+		for (int s = 0; s < mesh->get_surface_count(); ++s) {
+			Array arrays = mesh->surface_get_arrays(s);
+			PackedVector3Array verts = arrays[Mesh::ARRAY_VERTEX];
+			PackedInt32Array indices = arrays[Mesh::ARRAY_INDEX];
+			const int v_offset = static_cast<int>(rest_cache.positions.size());
+			for (int i = 0; i < verts.size(); ++i) {
+				Vector3 v = verts[i];
+				rest_cache.positions.push_back({ v.x, v.y, v.z });
 			}
-		} else {
-			for (int i = 0; i + 2 < verts.size(); i += 3) {
-				tri.triangles.push_back({ v_offset + i, v_offset + i + 1, v_offset + i + 2 });
+			if (indices.size() > 0) {
+				for (int i = 0; i + 2 < indices.size(); i += 3) {
+					rest_cache.tri_indices.push_back(v_offset + indices[i]);
+					rest_cache.tri_indices.push_back(v_offset + indices[i + 1]);
+					rest_cache.tri_indices.push_back(v_offset + indices[i + 2]);
+				}
+			} else {
+				for (int i = 0; i + 2 < verts.size(); i += 3) {
+					rest_cache.tri_indices.push_back(v_offset + i);
+					rest_cache.tri_indices.push_back(v_offset + i + 1);
+					rest_cache.tri_indices.push_back(v_offset + i + 2);
+				}
 			}
 		}
+
+		const std::size_t nv = rest_cache.positions.size();
+		curvenet::HalfedgeMesh hm =
+			curvenet::halfedge_builder::from_triangles(nv, rest_cache.tri_indices);
+
+		// Fresh CutMesh: every vertex starts as mesh_vertex.
+		rest_cache.cut_mesh = curvenet::cut_mesh::CutMesh{};
+		rest_cache.cut_mesh.base = hm;
+		rest_cache.cut_mesh.vertex_kind.assign(
+			nv, curvenet::cut_mesh::CutVertexKind::mesh_vertex_kind());
+		rest_cache.cut_mesh.segment_of_halfedge.assign(hm.he_count(), -1);
+
+		// Build curvenet from profile_curves' rest knot positions.
+		std::vector<curvenet::curvenet_builder::CurvePoints> input_curves;
+		input_curves.reserve(profile_curves.size());
+		for (int i = 0; i < profile_curves.size(); ++i) {
+			Ref<Curve3D> c = profile_curves[i];
+			curvenet::curvenet_builder::CurvePoints pts;
+			if (c.is_valid()) {
+				const int n = c->get_point_count();
+				pts.reserve(n);
+				for (int j = 0; j < n; ++j) {
+					Vector3 p = c->get_point_position(j);
+					pts.push_back({ p.x, p.y, p.z });
+				}
+			}
+			input_curves.push_back(pts);
+		}
+		const curvenet::curvenet_builder::CurvenetGraph cg =
+			curvenet::curvenet_builder::build(input_curves, 1.0e-6);
+
+		// Project each merged curvenet knot to its closest mesh vertex.
+		const auto projections = curvenet::surface_projection::project_to_vertices(
+			cg.knot_positions, rest_cache.positions);
+		const std::vector<int> knot_to_col =
+			curvenet::surface_projection::promote_vertex_samples(
+				rest_cache.cut_mesh, projections);
+
+		// Build per-column rest position + (curve_id, handle_idx) lookup.
+		// The first knot mapped to each column wins.
+		const int max_col = [&]() {
+			int m = -1;
+			for (int c : knot_to_col) {
+				if (c > m) {
+					m = c;
+				}
+			}
+			return m;
+		}();
+		rest_cache.nc = max_col + 1;
+		rest_cache.col_rest_pos.assign(rest_cache.nc, curvenet::Vec3{ 0.0, 0.0, 0.0 });
+		rest_cache.col_input_handle.assign(rest_cache.nc, std::make_pair(-1, -1));
+		std::vector<bool> col_set(rest_cache.nc, false);
+		for (std::size_t k = 0; k < knot_to_col.size(); ++k) {
+			const int col = knot_to_col[k];
+			if (col < 0 || col_set[col]) {
+				continue;
+			}
+			const auto &incidence = cg.incidence[k];
+			if (incidence.empty()) {
+				continue;
+			}
+			const auto &ref = incidence.front();
+			rest_cache.col_input_handle[col] =
+				std::make_pair(ref.curve_id, ref.knot_idx);
+			rest_cache.col_rest_pos[col] = projections[k].position;
+			col_set[col] = true;
+		}
+
+		rest_cache.source_hash = hash_val;
+		rest_cache.valid = true;
 	}
 
-	curvenet::TrisToQuadsParams params;
-	params.length_tiebreak = length_tiebreak;
-	rest_cache.poly = curvenet::tris_to_quads(tri, params);
-	rest_cache.bindings = curvenet::bind_polymesh(rest_cache.poly);
-	rest_cache.source_hash = hash_val;
-	rest_cache.valid = true;
+	const std::size_t nv = rest_cache.positions.size();
+	const int nc = rest_cache.nc;
+
+	if (nc == 0) {
+		// No curvenet samples — emit the source mesh unchanged.
+		Ref<SurfaceTool> st;
+		st.instantiate();
+		st->begin(Mesh::PRIMITIVE_TRIANGLES);
+		for (const curvenet::Vec3 &v : rest_cache.positions) {
+			st->add_vertex(Vector3(v.x, v.y, v.z));
+		}
+		for (std::size_t i = 0; i + 2 < rest_cache.tri_indices.size(); i += 3) {
+			st->add_index(rest_cache.tri_indices[i]);
+			st->add_index(rest_cache.tri_indices[i + 1]);
+			st->add_index(rest_cache.tri_indices[i + 2]);
+		}
+		st->generate_normals();
+		set_mesh(st->commit());
+		return;
 	}
 
-rest_cache_hit:
-	const curvenet::PolyMesh &poly = rest_cache.poly;
-	const std::vector<curvenet::BoundVertex> &bindings = rest_cache.bindings;
-
-	// Build a CurveNet from authored Curve3D profile_curves. For now each
-	// quad face's 4 boundaries come from straight-line bezier segments
-	// between its corners, so deform with no curves authored is identity.
-	// When profile_curves has 4 entries, we treat them as the four edges of
-	// the (single) face and bind them in order.
-	curvenet::CurveNet net;
-	net.faces.reserve(poly.faces.size());
-	std::vector<curvenet::ProfileCurve> profiles;
-	profiles.reserve(profile_curves.size());
-	for (int i = 0; i < profile_curves.size(); ++i) {
-		Ref<Curve3D> c = profile_curves[i];
-		profiles.push_back(to_profile_curve(c));
+	// Per-frame: assemble Fc (identity per sample) and Xc (current handle
+	// positions from profile_curves).
+	std::vector<double> Fc(nc * 9, 0.0);
+	std::vector<double> Xc(nc * 3, 0.0);
+	for (int c = 0; c < nc; ++c) {
+		Fc[c * 9 + 0] = 1.0;
+		Fc[c * 9 + 4] = 1.0;
+		Fc[c * 9 + 8] = 1.0;
+		const auto &handle = rest_cache.col_input_handle[c];
+		curvenet::Vec3 pos = rest_cache.col_rest_pos[c];
+		if (handle.first >= 0 && handle.first < profile_curves.size()) {
+			Ref<Curve3D> curve = profile_curves[handle.first];
+			if (curve.is_valid() &&
+					handle.second >= 0 &&
+					handle.second < curve->get_point_count()) {
+				Vector3 p = curve->get_point_position(handle.second);
+				pos = { p.x, p.y, p.z };
+			}
+		}
+		Xc[c * 3 + 0] = pos.x;
+		Xc[c * 3 + 1] = pos.y;
+		Xc[c * 3 + 2] = pos.z;
 	}
-	auto straight_curve_between = [](const Vec3_t &a, const Vec3_t &b) {
-		curvenet::BoundaryCurve bc;
-		bc.c0 = a;
-		bc.c3 = b;
-		bc.c1 = a + (b - a) * (1.0 / 3.0);
-		bc.c2 = a + (b - a) * (2.0 / 3.0);
-		return bc;
+
+	// `surface_projection::promote_vertex_samples` packs the column index
+	// into vertex_kind.curve_id with sample_idx = 0, so the deformer's
+	// sample-column packer just passes the curve_id through.
+	const auto sample_col = [](int curve_id, int /*sample_idx*/, bool /*side*/) -> int {
+		return curve_id;
 	};
-	for (const auto &f : poly.faces) {
-		if (f.count != 4) {
-			net.faces.push_back(curvenet::BoundFace{});
-			continue;
-		}
-		curvenet::BoundFace bf;
-		const auto &v00 = poly.vertices[f.v[0]];
-		const auto &v10 = poly.vertices[f.v[1]];
-		const auto &v11 = poly.vertices[f.v[2]];
-		const auto &v01 = poly.vertices[f.v[3]];
-		// CCW boundary loop matching CoonsPatch from NgonPatch:
-		//   bottom (P00->P10), right (P10->P11), top reversed (P11->P01), left reversed (P01->P00).
-		bf.boundaries.push_back(straight_curve_between(v00, v10));
-		bf.boundaries.push_back(straight_curve_between(v10, v11));
-		bf.boundaries.push_back(straight_curve_between(v11, v01));
-		bf.boundaries.push_back(straight_curve_between(v01, v00));
-		// If the user authored exactly one Curve3D, use it for the bottom edge
-		// of every face — quick way to see deformation in the demo. Future
-		// slice: per-face-per-edge curve assignment.
-		if (profiles.size() == 1) {
-			const auto &p = profiles[0];
-			if (p.handles.size() >= 2) {
-				bf.boundaries[0].c0 = p.handles[0];
-				bf.boundaries[0].c1 = p.tangents_out[0];
-				bf.boundaries[0].c2 = p.tangents_in[1 % p.handles.size()];
-				bf.boundaries[0].c3 = p.handles[1 % p.handles.size()];
-			}
-		}
-		net.faces.push_back(bf);
-	}
 
-	// Deform using the bindings + curvenet.
-	std::vector<curvenet::Vec3> deformed = curvenet::deform(net, bindings);
+	const std::vector<double> Xv = curvenet::deform_solve::solve_deformation(
+		rest_cache.cut_mesh, rest_cache.positions, sample_col, Fc, Xc);
 
-	UtilityFunctions::print("CurveNetDeformer3D: ", static_cast<int>(profiles.size()),
-			" profiles, ", static_cast<int>(poly.faces.size()), " faces, ",
-			static_cast<int>(deformed.size()), " deformed verts");
-
-	// Re-emit as a triangle ArrayMesh (quads triangulated for Godot rendering).
+	// Emit the deformed mesh. Sample vertices come from Xc (the solver
+	// returns 0 for promoted slots — we overlay the sample target);
+	// non-sample vertices use Xv.
 	Ref<SurfaceTool> st;
 	st.instantiate();
 	st->begin(Mesh::PRIMITIVE_TRIANGLES);
-	for (std::size_t i = 0; i < poly.vertices.size(); ++i) {
-		const auto &v = (bindings[i].face_index >= 0) ? deformed[i] : poly.vertices[i];
-		st->add_vertex(Vector3(v.x, v.y, v.z));
-	}
-	for (const auto &f : poly.faces) {
-		if (f.count == 3) {
-			st->add_index(f.v[0]);
-			st->add_index(f.v[1]);
-			st->add_index(f.v[2]);
-		} else if (f.count == 4) {
-			// Triangulate the quad along the (v0, v2) diagonal.
-			st->add_index(f.v[0]);
-			st->add_index(f.v[1]);
-			st->add_index(f.v[2]);
-			st->add_index(f.v[0]);
-			st->add_index(f.v[2]);
-			st->add_index(f.v[3]);
+	for (std::size_t v = 0; v < nv; ++v) {
+		const auto &kind = rest_cache.cut_mesh.vertex_kind[v];
+		if (kind.tag == curvenet::cut_mesh::CutVertexKindTag::sample) {
+			const int col = kind.curve_id;
+			st->add_vertex(Vector3(
+				Xc[col * 3 + 0], Xc[col * 3 + 1], Xc[col * 3 + 2]));
+		} else {
+			st->add_vertex(Vector3(
+				Xv[v * 3 + 0], Xv[v * 3 + 1], Xv[v * 3 + 2]));
 		}
 	}
+	for (std::size_t i = 0; i + 2 < rest_cache.tri_indices.size(); i += 3) {
+		st->add_index(rest_cache.tri_indices[i]);
+		st->add_index(rest_cache.tri_indices[i + 1]);
+		st->add_index(rest_cache.tri_indices[i + 2]);
+	}
 	st->generate_normals();
-	Ref<ArrayMesh> out_mesh = st->commit();
-	set_mesh(out_mesh);
+	set_mesh(st->commit());
 
-	UtilityFunctions::print("CurveNetDeformer3D: ",
-			static_cast<int>(poly.vertices.size()), " verts, ",
-			static_cast<int>(poly.faces.size()), " faces (cache ",
-			(rest_cache.valid ? "valid" : "miss"), ")");
+	UtilityFunctions::print(
+		"CurveNetDeformer3D: ",
+		static_cast<int>(profile_curves.size()), " profiles, ",
+		nc, " sample columns, ",
+		static_cast<int>(nv), " verts deformed");
 }
 
 int CurveNetDeformer3D::get_face_count() const {
-	return rest_cache.valid ? static_cast<int>(rest_cache.poly.faces.size()) : 0;
+	return rest_cache.valid
+		? static_cast<int>(rest_cache.cut_mesh.base.face_count)
+		: 0;
 }
 
-int CurveNetDeformer3D::get_face_vertex_count(int face_index) const {
-	if (!rest_cache.valid || face_index < 0 ||
-			face_index >= static_cast<int>(rest_cache.poly.faces.size())) {
-		return 0;
-	}
-	return rest_cache.poly.faces[face_index].count;
+int CurveNetDeformer3D::get_face_vertex_count(int /*face_index*/) const {
+	// New pipeline operates on triangle-only cut-meshes; every face has
+	// exactly 3 halfedges in its loop.
+	return rest_cache.valid ? 3 : 0;
 }
 
-Vector3 CurveNetDeformer3D::evaluate_face(int face_index, double s, double t) {
-	if (!rest_cache.valid) {
-		// Build the cache lazily so the first call works without a prior apply_deformation().
-		apply_deformation();
-	}
-	if (!rest_cache.valid || face_index < 0 ||
-			face_index >= static_cast<int>(rest_cache.poly.faces.size())) {
-		UtilityFunctions::printerr("CurveNetDeformer3D::evaluate_face: face_index out of range");
-		return Vector3{ 0.0f, 0.0f, 0.0f };
-	}
-	const curvenet::PolyFace &f = rest_cache.poly.faces[face_index];
-	if (f.count != 4) {
-		// Triangle path: fall back to bilinear-on-corners (degenerate Coons handled in NgonPatch).
-		// For now return the centroid as a stand-in.
-		curvenet::Vec3 acc{ 0.0, 0.0, 0.0 };
-		for (int i = 0; i < f.count; ++i) {
-			acc += rest_cache.poly.vertices[f.v[i]];
-		}
-		acc = acc * (1.0 / f.count);
-		return Vector3(acc.x, acc.y, acc.z);
-	}
-	auto straight = [](const curvenet::Vec3 &a, const curvenet::Vec3 &b) {
-		curvenet::BoundaryCurve bc;
-		bc.c0 = a;
-		bc.c3 = b;
-		bc.c1 = a + (b - a) * (1.0 / 3.0);
-		bc.c2 = a + (b - a) * (2.0 / 3.0);
-		return bc;
-	};
-	curvenet::CoonsPatch c;
-	const auto &v00 = rest_cache.poly.vertices[f.v[0]];
-	const auto &v10 = rest_cache.poly.vertices[f.v[1]];
-	const auto &v11 = rest_cache.poly.vertices[f.v[2]];
-	const auto &v01 = rest_cache.poly.vertices[f.v[3]];
-	c.u0 = straight(v00, v10);
-	c.v1 = straight(v10, v11);
-	c.u1 = straight(v01, v11);
-	c.v0 = straight(v00, v01);
-	curvenet::Vec3 r = c.evaluate(s, t);
-	return Vector3(r.x, r.y, r.z);
+Vector3 CurveNetDeformer3D::evaluate_face(int /*face_index*/, double /*s*/, double /*t*/) {
+	// Per-face Coons evaluation belonged to the old tris-to-quads stub. The
+	// DeGoes22 pipeline doesn't expose per-face evaluation — the deformation
+	// is global through the §4.3 solve. This entry point is retained for
+	// API compatibility; callers should sample the deformed mesh directly.
+	return Vector3{ 0.0f, 0.0f, 0.0f };
 }
 
 } // namespace godot
