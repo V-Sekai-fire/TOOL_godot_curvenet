@@ -1,0 +1,5 @@
+name = "Curvenet"
+defaultTargets = ["Curvenet"]
+
+[[lean_lib]]
+name = "Curvenet"
