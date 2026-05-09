@@ -65,7 +65,46 @@ Multi-RHS amortises the per-iter dispatch overhead k×, with iter
 count being the **max over columns** (not sum). The deformer's
 per-frame solves are k=9 (Fv) and k=3 (Xv).
 
-## Why M2 Pro / MoltenVK numbers don't generalise
+## fp32 precision is not enough on the deformer's actual matrix
+
+Validated 2026-05 by running `gpu_cg_solver` (the same kernel set
+that passes synthetic 2D-Laplacian tests at residuals ~1e-7 to 1e-6)
+against the deformer's actual `LhsM` matrix from real character
+meshes. Results (`make -C tests bench_5k_gpu`,
+`bench_70k_gpu`):
+
+| Mesh         | nv    | CPU iters / resid | GPU iters / resid | GPU outcome |
+|--------------|-------|-------------------|-------------------|-------------|
+| Mire 5k      | 5485  | 1,401 / 4.3e-9    | 10,970 (cap) / **0.073**    | did not converge |
+| Mire 81k     | 81613 | 20,668 / 1.2e-8   | 163,226 (cap) / **2.1e3**   | did not converge |
+
+GPU CG hits its iter cap on both. Cause: even with df32 dots, the
+per-vertex `x` is stored as fp32. Over ~1k+ iters the fp32 accumulation
+errors compound and the residual can't drop below the fp32 precision
+floor on a matrix this conditioned (κ ≈ 4×10⁸ at 81k). The synthetic
+2D Laplacian tests passed because those matrices have κ ≈ 10⁴-10⁵
+and need ~30-300 iters — comfortably inside fp32's 7-digit budget.
+
+What this means: the current GPU CG infrastructure is not directly
+applicable to the deformer's matrices at any scale. Three viable
+next paths:
+
+1. **Mixed-precision iterative refinement** (Buttari 2008 /
+   Carson-Higham 2018, in references.bib). Outer fp64 loop on CPU
+   that wraps the GPU fp32 CG. Each refinement iter computes a fp64
+   residual on CPU, then solves the correction step on GPU in fp32,
+   adding the result back. ~3-5 outer iters drives final residual
+   below fp64 floor regardless of inner fp32 stagnation.
+2. **Per-meshlet GPU CG.** Each meshlet's local matrix is small
+   (~256×256) and well-conditioned (κ ≤ 10² typically); fp32 CG
+   converges in 30-100 iters within fp32's precision budget. The
+   meshlet decomposition path becomes load-bearing here — not just
+   for parallelism, but for precision.
+3. **fp64 GPU CG.** Native fp64 throughput is 1/16 (RDNA 2) to 1/64
+   (Adreno) of fp32, so this kills the GPU advantage on the target
+   hardware. Off the table for Steam Deck / Quest 3.
+
+
 
 | | Steam Deck (RDNA 2, native Vulkan) | Quest 3 (Adreno, native Vulkan) |
 |---|---|---|

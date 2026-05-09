@@ -162,6 +162,20 @@ bin/bench_deform_70k: bench_deform_70k.cpp mire_body_70k_data.h | bin
 bench_70k: bin/bench_deform_70k
 	@bin/bench_deform_70k
 
+bin/bench_deform_70k_gpu: bench_deform_70k_gpu.cpp mire_body_70k_data.h gpu_compute_helpers.h gpu_cg_solver.h | bin
+	$(CXX) $(GPU_CXXFLAGS) -O3 -DNDEBUG -o $@ $< $(GPU_LDFLAGS)
+
+bench_70k_gpu: bin/bench_deform_70k_gpu \
+                bin/spmv.spv bin/dot_reduce.spv bin/axpy.spv bin/jacobi.spv bin/saxpby.spv
+	@$(GPU_RUN_ENV) bin/bench_deform_70k_gpu
+
+bin/bench_deform_5k_gpu: bench_deform_5k_gpu.cpp mire_body_data.h gpu_compute_helpers.h gpu_cg_solver.h | bin
+	$(CXX) $(GPU_CXXFLAGS) -O3 -DNDEBUG -o $@ $< $(GPU_LDFLAGS)
+
+bench_5k_gpu: bin/bench_deform_5k_gpu \
+               bin/spmv.spv bin/dot_reduce.spv bin/axpy.spv bin/jacobi.spv bin/saxpby.spv
+	@$(GPU_RUN_ENV) bin/bench_deform_5k_gpu
+
 bin/diag_real_mesh: diag_real_mesh.cpp mire_body_data.h | bin
 	$(CXX) $(BENCH_CXXFLAGS) -o $@ $<
 
