@@ -36,12 +36,33 @@ signal _request_redraw
 
 func _ready() -> void:
 	assert(get_parent() is MeshInstance3D)
-	
+
 	_refresh_point_arrays()
-	
+
 	# Refresh the points just in case we are dealing with a new mesh
 	EditorInterface.get_selection().selection_changed.connect(_refresh_point_arrays)
-	_request_redraw.connect((get_node_or_null("../../MeshMorph3D") as MeshMorph3D).apply_deformation_to_children)
+	# Wire to a CurveNetDeformer3D sibling so handle moves trigger redeform.
+	# Look up by class so we don't hardcode a node name; falls back silently
+	# if the user hasn't placed one in the scene yet.
+	var deformer := _find_curvenet_deformer()
+	if deformer != null:
+		_request_redraw.connect(deformer.apply_deformation)
+
+func _find_curvenet_deformer() -> Node:
+	# Walk siblings + parent's siblings looking for a CurveNetDeformer3D.
+	var p := get_parent()
+	if p == null:
+		return null
+	for child in p.get_children():
+		if child.get_class() == "CurveNetDeformer3D":
+			return child
+	var gp := p.get_parent()
+	if gp == null:
+		return null
+	for child in gp.get_children():
+		if child.get_class() == "CurveNetDeformer3D":
+			return child
+	return null
 
 func _refresh_point_arrays():
 	if not self in EditorInterface.get_selection().get_selected_nodes():

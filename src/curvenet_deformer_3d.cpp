@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 #include "curvenet_deformer_3d.h"
 
+#include "curvenet/binding.h"
+#include "curvenet/curvenet.h"
 #include "curvenet/profile_curve.h"
 #include "curvenet/tris_to_quads.h"
 
@@ -16,6 +18,9 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 namespace godot {
+
+// Local alias to disambiguate from godot::Vector3 in the tri-mesh push_back below.
+using Vec3_t = curvenet::Vec3;
 
 namespace {
 
@@ -148,25 +153,74 @@ void CurveNetDeformer3D::apply_deformation() {
 	params.length_tiebreak = length_tiebreak;
 	curvenet::PolyMesh poly = curvenet::tris_to_quads(tri, params);
 
-	// Convert each authored Curve3D to a ProfileCurve so the next slice can
-	// build a CurveNet from them. For now we just diagnostic-print to verify
-	// the round-trip works in editor.
+	// Auto-bind each rest-pose vertex to its closest quad face's bilinear (s,t).
+	std::vector<curvenet::BoundVertex> bindings = curvenet::bind_polymesh(poly);
+
+	// Build a CurveNet from authored Curve3D profile_curves. For now each
+	// quad face's 4 boundaries come from straight-line bezier segments
+	// between its corners, so deform with no curves authored is identity.
+	// When profile_curves has 4 entries, we treat them as the four edges of
+	// the (single) face and bind them in order.
+	curvenet::CurveNet net;
+	net.faces.reserve(poly.faces.size());
 	std::vector<curvenet::ProfileCurve> profiles;
 	profiles.reserve(profile_curves.size());
 	for (int i = 0; i < profile_curves.size(); ++i) {
 		Ref<Curve3D> c = profile_curves[i];
 		profiles.push_back(to_profile_curve(c));
 	}
-	UtilityFunctions::print("CurveNetDeformer3D: ", static_cast<int>(profiles.size()),
-			" profile curves loaded");
+	auto straight_curve_between = [](const Vec3_t &a, const Vec3_t &b) {
+		curvenet::BoundaryCurve bc;
+		bc.c0 = a;
+		bc.c3 = b;
+		bc.c1 = a + (b - a) * (1.0 / 3.0);
+		bc.c2 = a + (b - a) * (2.0 / 3.0);
+		return bc;
+	};
+	for (const auto &f : poly.faces) {
+		if (f.count != 4) {
+			net.faces.push_back(curvenet::BoundFace{});
+			continue;
+		}
+		curvenet::BoundFace bf;
+		const auto &v00 = poly.vertices[f.v[0]];
+		const auto &v10 = poly.vertices[f.v[1]];
+		const auto &v11 = poly.vertices[f.v[2]];
+		const auto &v01 = poly.vertices[f.v[3]];
+		// CCW boundary loop matching CoonsPatch from NgonPatch:
+		//   bottom (P00->P10), right (P10->P11), top reversed (P11->P01), left reversed (P01->P00).
+		bf.boundaries.push_back(straight_curve_between(v00, v10));
+		bf.boundaries.push_back(straight_curve_between(v10, v11));
+		bf.boundaries.push_back(straight_curve_between(v11, v01));
+		bf.boundaries.push_back(straight_curve_between(v01, v00));
+		// If the user authored exactly one Curve3D, use it for the bottom edge
+		// of every face — quick way to see deformation in the demo. Future
+		// slice: per-face-per-edge curve assignment.
+		if (profiles.size() == 1) {
+			const auto &p = profiles[0];
+			if (p.handles.size() >= 2) {
+				bf.boundaries[0].c0 = p.handles[0];
+				bf.boundaries[0].c1 = p.tangents_out[0];
+				bf.boundaries[0].c2 = p.tangents_in[1 % p.handles.size()];
+				bf.boundaries[0].c3 = p.handles[1 % p.handles.size()];
+			}
+		}
+		net.faces.push_back(bf);
+	}
 
-	// Re-emit as a triangle ArrayMesh (quads triangulated for Godot rendering;
-	// the quad topology is preserved internally for patch evaluation in the
-	// next slice).
+	// Deform using the bindings + curvenet.
+	std::vector<curvenet::Vec3> deformed = curvenet::deform(net, bindings);
+
+	UtilityFunctions::print("CurveNetDeformer3D: ", static_cast<int>(profiles.size()),
+			" profiles, ", static_cast<int>(poly.faces.size()), " faces, ",
+			static_cast<int>(deformed.size()), " deformed verts");
+
+	// Re-emit as a triangle ArrayMesh (quads triangulated for Godot rendering).
 	Ref<SurfaceTool> st;
 	st.instantiate();
 	st->begin(Mesh::PRIMITIVE_TRIANGLES);
-	for (const auto &v : poly.vertices) {
+	for (std::size_t i = 0; i < poly.vertices.size(); ++i) {
+		const auto &v = (bindings[i].face_index >= 0) ? deformed[i] : poly.vertices[i];
 		st->add_vertex(Vector3(v.x, v.y, v.z));
 	}
 	for (const auto &f : poly.faces) {
