@@ -132,31 +132,61 @@ budget at 100k-vertex scale.
 
 ### What's already implemented in the GPU path
 
-* `src/curvenet/shaders/spmv.comp`
-* `src/curvenet/shaders/dot_reduce.comp` (df32, ~48-bit mantissa)
-* `src/curvenet/shaders/axpy.comp` / `jacobi.comp` / `saxpby.comp`
-* `tests/gpu_cg_solver.h` — header-only Vulkan-compute CG with
-  pre-recorded command buffers, recycled fences, and warm-start support
-* `tests/gpu_*_test.cpp` — 18 standalone correctness cases
+* Single-RHS shaders: `spmv.comp`, `dot_reduce.comp` (df32),
+  `axpy.comp`, `jacobi.comp`, `saxpby.comp`
+* Multi-RHS shaders: `spmv_multi.comp`, `dot_reduce_multi.comp`
+  (df32 per column, K_MAX=16), `axpy_multi.comp`, `jacobi_multi.comp`,
+  `saxpby_multi.comp`
+* `tests/gpu_cg_solver.h` — single-RHS CG, pre-recorded CBs, warm-start
+* `tests/gpu_cg_multi_solver.h` — multi-RHS CG, k columns per dispatch
+* `tests/gpu_*_test.cpp` — 22+ standalone correctness cases
+
+### Multi-RHS speedup (M2 Pro / MoltenVK)
+
+`make -C tests gpu_multi_bench` compares one nv×k multi-RHS solve
+against k separate single-RHS solves on the same A·X = B problem.
+
+| N×N  | `nv`  | k  | single ms (it) | multi ms (it) | speedup |
+|------|-------|----|----------------|---------------|---------|
+|  10² |   100 |  3 |  111.04 (102)  |  37.85 (34)   |  2.93×  |
+|  10² |   100 |  9 |  321.87 (309)  |  52.30 (35)   |  6.15×  |
+|  10² |   100 | 12 |  402.02 (412)  |  59.75 (35)   |  6.73×  |
+|  20² |   400 |  3 |  236.12 (214)  |  89.83 (76)   |  2.63×  |
+|  20² |   400 |  9 |  661.12 (625)  | 127.89 (76)   |  5.17×  |
+|  20² |   400 | 12 |  894.65 (833)  | 157.05 (76)   |  5.70×  |
+|  30² |   900 | 12 | 1366.89 (1282) | 189.62 (114)  |  7.21×  |
+|  50² |  2500 | 12 | 2374.19 (2150) | 657.51 (190)  |  3.61×  |
+|  70² |  4900 | 12 | 3606.76 (2932) |1141.79 (265)  |  3.16×  |
+
+Why multi-RHS wins: each CG iter has ~3 host-GPU round-trips for
+α/β/residual scalars. Single-RHS pays this k times (once per column);
+multi-RHS pays it once for k columns at once. Iter count for the
+multi path is the **max over columns** (not sum), so the per-column
+work also amortises.
+
+Wins are biggest at small n where dispatch overhead dominates (the
+~3× → 7× range), and shrink at large n where actual compute starts
+mattering. The deformer's per-frame solves are exactly k=9 (Fv) and
+k=3 (Xv) at character-mesh sizes (1k-50k vertices) — sweet spot for
+multi-RHS.
 
 ## Next perf milestones
 
-1. **Multi-RHS batching.** The deformer solves 12 RHS columns
-   per frame. Stacking them into one nv × 12 working buffer and
-   dispatching the same kernels with a length-12 inner loop
-   amortises dispatch overhead 12×. Single most impactful GPU win.
-2. **Move the solver under `src/curvenet/`** so the deformer can
+1. **Move the solver under `src/curvenet/`** so the deformer can
    pImpl-wrap it (todos/08 phase 7). Auto-fall-back to
    `sparse::cg_with_guess` when `RenderingDevice::is_compute_supported`
    returns false (web build, gl_compatibility renderer).
-3. **End-to-end deformer bench with GPU path enabled.** Add a row
+2. **End-to-end deformer bench with GPU path enabled.** Add a row
    to the sparse-path table comparing GPU vs CPU on the actual §4.3
    solve, not the synthetic 2D Laplacian above.
-4. Incomplete Cholesky preconditioner on `LhsM_csr` to reduce
+3. Incomplete Cholesky preconditioner on `LhsM_csr` to reduce
    iteration count further, at the cost of extra bind time.
-5. Fused CG kernel — single shader runs the whole iter, with α/β
+4. Fused CG kernel — single shader runs the whole iter, with α/β
    computed on the GPU via a tiny scalar shader. Eliminates host
    round-trips entirely.
+5. Multi-workgroup `dot_reduce_multi` for very large n (current
+   single-WG grid-strided uses 1 CU; for n > ~50k a two-pass
+   reduction would use all CUs).
 
 ## When to re-run
 
@@ -172,5 +202,10 @@ Re-run `make -C tests gpu_bench` after any of:
 
 * changes to the GPU shaders under `src/curvenet/shaders/`
 * changes to `tests/gpu_cg_solver.h` (CB layout, recording strategy)
-* multi-RHS batching landing
 * moving the solver to `src/curvenet/gpu_sparse_solve.{h,cpp}`
+
+Re-run `make -C tests gpu_multi_bench` after any of:
+
+* changes to the `*_multi.comp` shaders
+* changes to `tests/gpu_cg_multi_solver.h`
+* convergence-criterion changes in either solver (max-rr vs sum)

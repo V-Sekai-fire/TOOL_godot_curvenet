@@ -86,15 +86,28 @@ bin/gpu_cg_bench: gpu_cg_bench.cpp gpu_compute_helpers.h gpu_cg_solver.h | bin
 bin/gpu_multi_rhs_test: gpu_multi_rhs_test.cpp gpu_compute_helpers.h | bin
 	$(CXX) $(GPU_CXXFLAGS) -o $@ $< $(GPU_LDFLAGS)
 
+bin/gpu_cg_multi_test: gpu_cg_multi_test.cpp gpu_compute_helpers.h gpu_cg_solver.h gpu_cg_multi_solver.h | bin
+	$(CXX) $(GPU_CXXFLAGS) -o $@ $< $(GPU_LDFLAGS)
+
 gpu_bench: bin/gpu_cg_bench bin/spmv.spv bin/dot_reduce.spv bin/axpy.spv bin/jacobi.spv bin/saxpby.spv
 	@$(GPU_RUN_ENV) bin/gpu_cg_bench
+
+bin/gpu_cg_multi_bench: gpu_cg_multi_bench.cpp gpu_compute_helpers.h gpu_cg_solver.h gpu_cg_multi_solver.h | bin
+	$(CXX) $(GPU_CXXFLAGS) -O3 -DNDEBUG -o $@ $< $(GPU_LDFLAGS)
+
+gpu_multi_bench: bin/gpu_cg_multi_bench \
+                  bin/spmv.spv bin/dot_reduce.spv bin/axpy.spv bin/jacobi.spv bin/saxpby.spv \
+                  bin/spmv_multi.spv bin/dot_reduce_multi.spv \
+                  bin/axpy_multi.spv bin/jacobi_multi.spv bin/saxpby_multi.spv
+	@$(GPU_RUN_ENV) bin/gpu_cg_multi_bench
 
 gpu: bin/gpu_spmv_test bin/spmv.spv \
      bin/gpu_dot_test bin/dot_reduce.spv \
      bin/gpu_vec_ops_test bin/axpy.spv bin/jacobi.spv bin/saxpby.spv \
      bin/gpu_cg_test \
      bin/gpu_multi_rhs_test bin/spmv_multi.spv \
-     bin/axpy_multi.spv bin/jacobi_multi.spv bin/saxpby_multi.spv
+     bin/axpy_multi.spv bin/jacobi_multi.spv bin/saxpby_multi.spv bin/dot_reduce_multi.spv \
+     bin/gpu_cg_multi_test
 	@echo ">> spmv"
 	@$(GPU_RUN_ENV) bin/gpu_spmv_test bin/spmv.spv
 	@echo ""
@@ -109,6 +122,9 @@ gpu: bin/gpu_spmv_test bin/spmv.spv \
 	@echo ""
 	@echo ">> multi-RHS kernels"
 	@$(GPU_RUN_ENV) bin/gpu_multi_rhs_test
+	@echo ""
+	@echo ">> multi-RHS GPU CG"
+	@$(GPU_RUN_ENV) bin/gpu_cg_multi_test
 
 $(LIBRC): $(RC_OBJ)
 	ar rcs $@ $(RC_OBJ)

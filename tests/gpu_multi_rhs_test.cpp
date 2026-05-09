@@ -338,6 +338,68 @@ int run_jacobi_multi(VulkanCompute &vk, ComputeKernel &kernel, VkDescriptorPool 
     return ok ? 0 : 1;
 }
 
+int run_dot_multi(VulkanCompute &vk, ComputeKernel &kernel, VkDescriptorPool pool) {
+    const std::uint32_t n = 50000;
+    const std::uint32_t k = 12;
+    std::mt19937_64 rng(0xc0deULL);
+    std::uniform_real_distribution<double> d(-1.0, 1.0);
+    std::vector<float> a(n * k), b(n * k);
+    for (auto &v : a) v = static_cast<float>(d(rng));
+    for (auto &v : b) v = static_cast<float>(d(rng));
+
+    // CPU fp64 reference: per-column dot of fp32 inputs upcast.
+    std::vector<double> ref(k, 0.0);
+    for (std::uint32_t i = 0; i < n; ++i) {
+        for (std::uint32_t c = 0; c < k; ++c) {
+            ref[c] += static_cast<double>(a[i * k + c]) * static_cast<double>(b[i * k + c]);
+        }
+    }
+    // CPU fp32 reference: shows the precision floor df32 is meant to
+    // break through (only here for the diagnostic print; not used in
+    // the assert).
+    std::vector<float> ref32(k, 0.0f);
+    for (std::uint32_t i = 0; i < n; ++i) {
+        for (std::uint32_t c = 0; c < k; ++c) {
+            ref32[c] += a[i * k + c] * b[i * k + c];
+        }
+    }
+
+    Op op;
+    op.uniform.resize(8);
+    std::memcpy(op.uniform.data() + 0, &n, 4);
+    std::memcpy(op.uniform.data() + 4, &k, 4);
+    op.storage = { a, b, std::vector<float>(2 * k, 0.0f) };
+    op.output_index = 2;
+    op.output_count = 2 * k;
+    const std::vector<float> pair = dispatch_op(vk, kernel, pool, 1, op);
+
+    // Fold (hi, lo) per column to fp64.
+    std::vector<double> df(k);
+    for (std::uint32_t c = 0; c < k; ++c) {
+        df[c] = static_cast<double>(pair[2 * c + 0]) +
+                static_cast<double>(pair[2 * c + 1]);
+    }
+
+    bool ok = true;
+    double worst_df  = 0.0;
+    double worst_f32 = 0.0;
+    for (std::uint32_t c = 0; c < k; ++c) {
+        const double err_df  = std::fabs(df[c]    - ref[c]);
+        const double err_f32 = std::fabs(static_cast<double>(ref32[c]) - ref[c]);
+        const double mag = std::fabs(ref[c]) + 1e-30;
+        const double rel_df  = err_df  / mag;
+        const double rel_f32 = err_f32 / mag;
+        if (rel_df  > worst_df)  worst_df  = rel_df;
+        if (rel_f32 > worst_f32) worst_f32 = rel_f32;
+        if (rel_df > 1e-9) ok = false;
+    }
+    std::printf("  dot_multi    n=%-5u k=%-2u  fp32_rel=%9.2e  df32_rel=%9.2e  ratio=%6.0fx  %s\n",
+                  n, k, worst_f32, worst_df,
+                  worst_df > 0 ? worst_f32 / worst_df : 0.0,
+                  ok ? "OK" : "FAIL");
+    return ok ? 0 : 1;
+}
+
 int run_saxpby_multi(VulkanCompute &vk, ComputeKernel &kernel, VkDescriptorPool pool) {
     const std::uint32_t n = 50;
     const std::uint32_t k = 12;
@@ -391,6 +453,9 @@ int main(int argc, char **argv) {
 
     ComputeKernel k_saxpby_multi;
     k_saxpby_multi.init(vk.device, load_spv("bin/saxpby_multi.spv"), 5);
+
+    ComputeKernel k_dot_multi;
+    k_dot_multi.init(vk.device, load_spv("bin/dot_reduce_multi.spv"), 3);
 
     VkDescriptorPoolSize sizes[2]{};
     sizes[0].type            = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -456,8 +521,10 @@ int main(int argc, char **argv) {
     failures += run_axpy_multi  (vk, k_axpy_multi,   pool);
     failures += run_jacobi_multi(vk, k_jacobi_multi, pool);
     failures += run_saxpby_multi(vk, k_saxpby_multi, pool);
+    failures += run_dot_multi   (vk, k_dot_multi,    pool);
 
     vkDestroyDescriptorPool(vk.device, pool, nullptr);
+    k_dot_multi   .shutdown(vk.device);
     k_saxpby_multi.shutdown(vk.device);
     k_jacobi_multi.shutdown(vk.device);
     k_axpy_multi  .shutdown(vk.device);
