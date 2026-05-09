@@ -203,6 +203,38 @@ body that's 2.1e-7. The cot Laplacian on the resulting mesh has
 finite entries (off-diag dynamic range 10¹¹ vs `±∞` before) and CG
 converges.
 
+## Multi-level Schwarz (loop 8, generic)
+
+Generic multilevel V-cycle on top of the meshlet Schwarz smoother.
+Hierarchy auto-built by recursive principal-axis bucketing of
+centroids until top-level size is below `TOP_THRESHOLD = 16`,
+with `COARSEN_RATIO = 4` between levels. Galerkin matrices
+`A_{i+1} = R_i A_i R_i^T` chained from the fine matrix.
+
+| problem  | hierarchy                 | result                                                    |
+|----------|---------------------------|-----------------------------------------------------------|
+| 5k       | 5485 → 23 → 5             | converged in **169 outer iters / 2.4 s**                   |
+| 81k      | 81613 → 368 → 92 → 23 → 5 | did NOT converge, plateaus at residual 3.73 after 19 iters |
+
+5k result: marginal vs 2-level (193 iters), worse than 1-level
+Chebyshev-Schwarz (137 iters). Adding levels did not help.
+
+81k stall: identical plateau as 2-level. Adding levels did not
+change the dynamics. The bottleneck is **aggregation quality**,
+not level count: principal-axis bucketing produces
+non-spatially-contiguous super-aggregates (a single z-bucket on a
+T-pose body slices through head, both arms, and torso
+simultaneously), so the Galerkin coarse matrix has
+near-disconnected blocks and the coarse correction is ineffective
+on the medium-frequency error around meshlet boundaries.
+
+Next loop: replace the principal-axis aggregator with a
+**connectivity-aware** one — either BFS-greedy aggregation over
+the level-1 meshlet adjacency graph, or k-means on level-1
+centroids. The multilevel framework (`Hierarchy`,
+`restrict_through`, `prolong_through`, generic V-cycle) is correct
+and reusable; only the cmap-construction step needs to change.
+
 ## Next steps
 
 Real-mesh row is now interactive. Remaining levers, ranked by
