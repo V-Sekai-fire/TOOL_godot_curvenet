@@ -29,3 +29,4 @@ import Curvenet.HarmonicSolve
 import Curvenet.DeformSolve
 import Curvenet.CutAlgorithm
 import Curvenet.IntersectionFrames
+import Curvenet.CurveInterp
