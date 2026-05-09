@@ -171,6 +171,52 @@ int main(int argc, char **argv) {
         failures += run_case(gpu, "grid_laplacian(20) rand", A, b, 2000, 1e-9);
     }
 
+    // Warm-start: solve once cold, then re-solve with the cold result
+    // as initial guess. The warm solve should converge in 0-1 iters
+    // because x0 is already the answer (within fp32 floor).
+    {
+        const auto A = grid_laplacian(10);
+        std::vector<double> b(100);
+        for (int i = 0; i < 100; ++i) b[i] = (i % 3 == 0) ? 1.0 : -0.5;
+        gpu.prepare_matrix(A);
+        std::size_t cold_iters = 0;
+        const auto x_cold = gpu.solve(b, 1000, 1e-9, &cold_iters);
+        std::size_t warm_iters = 0;
+        const auto x_warm = gpu.solve_with_guess(b, x_cold, 1000, 1e-9, &warm_iters);
+        const double res_warm = max_abs_residual(A, x_warm, b);
+        const bool ok = (warm_iters <= cold_iters) && (res_warm <= 1e-4);
+        std::printf("  %-26s n=%-5zu  cold_iters=%-3zu  warm_iters=%-3zu  warm_res=%-9.3e  %s\n",
+                      "warm-start grid_lap(10)", A.rows,
+                      cold_iters, warm_iters, res_warm, ok ? "OK" : "FAIL");
+        if (!ok) ++failures;
+    }
+
+    // Slightly perturbed warm-start: nudge the cold result by ~1% so
+    // the warm solve still has nontrivial work to do, but should
+    // still finish in noticeably fewer iters than cold.
+    {
+        const auto A = grid_laplacian(20);
+        std::mt19937_64 rng(0x1234abcdULL);
+        std::uniform_real_distribution<double> d(-1.0, 1.0);
+        std::vector<double> b(400);
+        for (auto &v : b) v = d(rng);
+        gpu.prepare_matrix(A);
+        std::size_t cold_iters = 0;
+        const auto x_cold = gpu.solve(b, 2000, 1e-9, &cold_iters);
+        // Add 1% perturbation per element.
+        std::vector<double> x_seed = x_cold;
+        std::uniform_real_distribution<double> p(-0.01, 0.01);
+        for (auto &v : x_seed) v *= (1.0 + p(rng));
+        std::size_t warm_iters = 0;
+        const auto x_warm = gpu.solve_with_guess(b, x_seed, 2000, 1e-9, &warm_iters);
+        const double res_warm = max_abs_residual(A, x_warm, b);
+        const bool ok = (warm_iters < cold_iters) && (res_warm <= 1e-4);
+        std::printf("  %-26s n=%-5zu  cold_iters=%-3zu  warm_iters=%-3zu  warm_res=%-9.3e  %s\n",
+                      "warm-start +1% grid_lap(20)", A.rows,
+                      cold_iters, warm_iters, res_warm, ok ? "OK" : "FAIL");
+        if (!ok) ++failures;
+    }
+
     gpu.shutdown();
     vk.shutdown();
 

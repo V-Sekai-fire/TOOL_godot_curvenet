@@ -49,6 +49,15 @@ public:
     std::vector<double> solve(const std::vector<double> &b,
                                 std::size_t max_iter, double tol,
                                 std::size_t *iters_used = nullptr);
+    // Warm-started CG: starts from `x0` instead of zero. Mathematically
+    // identical fixed point to `solve(b, ...)`, but converges in
+    // far fewer iterations when x0 is close to the true solution —
+    // exactly the situation in the deformer's per-frame loop after
+    // the first frame.
+    std::vector<double> solve_with_guess(const std::vector<double> &b,
+                                            const std::vector<double> &x0,
+                                            std::size_t max_iter, double tol,
+                                            std::size_t *iters_used = nullptr);
     void shutdown();
 
 private:
@@ -283,6 +292,69 @@ inline double GpuCgSolver::read_dot_scalar() const {
     float pair[2];
     std::memcpy(pair, dot_pair.mapped, 2 * sizeof(float));
     return static_cast<double>(pair[0]) + static_cast<double>(pair[1]);
+}
+
+inline std::vector<double> GpuCgSolver::solve_with_guess(
+        const std::vector<double> &b, const std::vector<double> &x0,
+        std::size_t max_iter, double tol, std::size_t *iters_used) {
+    // Upload b and x0 (fp32).
+    {
+        std::vector<float> b32(n_rows);
+        for (std::uint32_t i = 0; i < n_rows; ++i) b32[i] = static_cast<float>(b[i]);
+        std::memcpy(b_buf.mapped, b32.data(), n_rows * sizeof(float));
+        std::vector<float> x32(n_rows);
+        for (std::uint32_t i = 0; i < n_rows; ++i) x32[i] = static_cast<float>(x0[i]);
+        std::memcpy(x_buf.mapped, x32.data(), n_rows * sizeof(float));
+        std::memcpy(p_buf.mapped, x32.data(), n_rows * sizeof(float));
+    }
+
+    // Ap ← A · p   (with p == x0).
+    dispatch_spmv(ds_spmv);
+
+    // r ← b   then   r ← r + (-1)·Ap   ⇒   r = b − A·x0.
+    std::memcpy(r_buf.mapped, b_buf.mapped, n_rows * sizeof(float));
+    write_axpy_uniform(u_axpy_r, n_rows, -1.0f);
+    dispatch_axpy(ds_axpy_r);
+
+    // z ← M⁻¹ · r.
+    dispatch_jacobi(ds_jacobi_r);
+    std::memcpy(p_buf.mapped, z_buf.mapped, n_rows * sizeof(float));
+
+    dispatch_dot(ds_dot_rz);
+    double rz_old = read_dot_scalar();
+
+    const double tol_sq = tol * tol;
+    std::size_t iter = 0;
+    for (; iter < max_iter; ++iter) {
+        dispatch_spmv(ds_spmv);
+        dispatch_dot(ds_dot_pAp);
+        const double pAp = read_dot_scalar();
+        if (pAp == 0.0) break;
+        const double alpha = rz_old / pAp;
+        write_axpy_uniform(u_axpy_x, n_rows, static_cast<float>(alpha));
+        dispatch_axpy(ds_axpy_x);
+        write_axpy_uniform(u_axpy_r, n_rows, static_cast<float>(-alpha));
+        dispatch_axpy(ds_axpy_r);
+        dispatch_dot(ds_dot_rr);
+        const double rr = read_dot_scalar();
+        if (rr < tol_sq) { ++iter; break; }
+        dispatch_jacobi(ds_jacobi_r);
+        dispatch_dot(ds_dot_rz);
+        const double rz_new = read_dot_scalar();
+        const double beta   = (rz_old == 0.0) ? 0.0 : (rz_new / rz_old);
+        write_saxpby_uniform(u_saxpby, n_rows, 1.0f, static_cast<float>(beta));
+        dispatch_saxpby(ds_saxpby);
+        rz_old = rz_new;
+    }
+    if (iters_used) *iters_used = iter;
+
+    std::vector<double> out(n_rows);
+    {
+        std::vector<float> x32(n_rows);
+        std::memcpy(x32.data(), x_buf.mapped, n_rows * sizeof(float));
+        for (std::uint32_t i = 0; i < n_rows; ++i) out[i] = static_cast<double>(x32[i]);
+    }
+    return out;
 }
 
 inline std::vector<double> GpuCgSolver::solve(const std::vector<double> &b,
