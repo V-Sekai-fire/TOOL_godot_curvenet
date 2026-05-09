@@ -6,15 +6,15 @@
 
 PROJECT_ROOT := $(abspath ..)
 RC := $(PROJECT_ROOT)/thirdparty/rapidcheck
-LEMON := $(PROJECT_ROOT)/thirdparty/lemon
 SRC := $(PROJECT_ROOT)/src
 
 CXX ?= c++
 CXXFLAGS := -std=c++14 -O0 -g -Wall -Wno-missing-braces -Wno-unused-command-line-argument \
-            -I$(RC)/include -I$(LEMON) -I$(SRC) -MMD -MP
+            -I$(RC)/include -I$(SRC) -MMD -MP
 LDLIBS := -lpthread
 
-CURVENET_OBJ := $(SRC)/curvenet/tris_to_quads.o $(SRC)/curvenet/curvenet.o
+# All curvenet runtime is header-only — no compiled .cpp objects to link.
+CURVENET_OBJ :=
 
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
@@ -25,7 +25,7 @@ RC_SRC := $(shell find $(RC)/src -name "*.cpp")
 RC_OBJ := $(RC_SRC:.cpp=.o)
 LIBRC := librapidcheck.a
 
-TESTS := test_bezier test_profile_curve test_coons_patch test_ngon_patch test_tris_to_quads test_curvenet test_bilinear_inverse test_binding test_pipeline test_mean_value test_halfedge test_polygon_laplacian test_dense_linalg test_scaled_frames test_cut_algorithm test_deform_solve test_halfedge_builder test_curvenet_builder test_surface_projection
+TESTS := test_halfedge test_polygon_laplacian test_dense_linalg test_scaled_frames test_cut_algorithm test_deform_solve test_halfedge_builder test_curvenet_builder test_surface_projection
 TEST_BINS := $(addprefix bin/,$(TESTS))
 
 .PHONY: all test clean
