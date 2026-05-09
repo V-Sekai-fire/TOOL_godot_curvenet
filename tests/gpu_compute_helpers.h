@@ -353,13 +353,30 @@ struct CommandBatch {
     }
 
     // Reset the CB to recording state so the same batch object can
-    // be re-recorded for the next iter.
+    // be re-recorded. No ONE_TIME flag — we want to allow re-submitting
+    // the recorded CB multiple times via submit_wait().
     void begin() {
         VK_OR_DIE(vkResetCommandBuffer(cmd, 0));
         VkCommandBufferBeginInfo bi{};
         bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        bi.flags = 0;
         VK_OR_DIE(vkBeginCommandBuffer(cmd, &bi));
+    }
+
+    void end() {
+        VK_OR_DIE(vkEndCommandBuffer(cmd));
+    }
+
+    // Submit the previously-recorded CB and wait for completion.
+    // Resets the fence so the same batch can be submitted again.
+    void submit_wait() {
+        VkSubmitInfo si{};
+        si.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        si.commandBufferCount = 1;
+        si.pCommandBuffers    = &cmd;
+        VK_OR_DIE(vkQueueSubmit(vk->queue, 1, &si, fence));
+        VK_OR_DIE(vkWaitForFences(vk->device, 1, &fence, VK_TRUE, UINT64_MAX));
+        VK_OR_DIE(vkResetFences(vk->device, 1, &fence));
     }
 
     void dispatch(VkPipeline pipeline, VkPipelineLayout layout,
@@ -385,14 +402,8 @@ struct CommandBatch {
     }
 
     void end_and_submit_wait() {
-        VK_OR_DIE(vkEndCommandBuffer(cmd));
-        VkSubmitInfo si{};
-        si.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        si.commandBufferCount = 1;
-        si.pCommandBuffers    = &cmd;
-        VK_OR_DIE(vkQueueSubmit(vk->queue, 1, &si, fence));
-        VK_OR_DIE(vkWaitForFences(vk->device, 1, &fence, VK_TRUE, UINT64_MAX));
-        VK_OR_DIE(vkResetFences(vk->device, 1, &fence));
+        end();
+        submit_wait();
     }
 };
 
