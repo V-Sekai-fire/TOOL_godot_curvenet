@@ -23,23 +23,36 @@ projected to the closest body vertices.
 
 | label                       | nv    | nh     | nc | bind ms | frame ms  | frames/s |
 |-----------------------------|-------|--------|----|---------|-----------|----------|
-| Mire body, 4-sample loop    |  5485 |  30856 | 4  |     421 |        91 |     11   |
-| Mire body, 8-sample loop    |  5485 |  30856 | 8  |     423 |        90 |     11   |
-| Mire body 2× subdivided     | 81613 | 481840 | 4  | **102000**  | **~80000** | **0.01** |
+| Mire body, 4-sample loop    |  5485 |  30856 | 4  |       9 |        91 |     11   |
+| Mire body, 8-sample loop    |  5485 |  30856 | 8  |       9 |        90 |     11   |
+| Mire body 2× subdivided     | 81613 | 481840 | 4  |     **166** | **~80000** | **0.01** |
 
 The 81k row is the actual PCVR-target measurement (81,613 verts, 159k
 tris, baked from `MireQuest.blend` after 2× edge-subdivide). The
-working monolithic system is **5000× short** of the 11 ms / 90 FPS
-budget at this scale. Two distinct bottlenecks:
+working monolithic system is **still 5000× short** of the 11 ms /
+90 FPS budget at solve time. The 102-sec bind bottleneck has been
+fixed:
 
-* **Bind = 102 sec.** `cut_mesh_laplacian::assemble_lh_csr_robust` and
-  `assemble_vt_lh_v_csr_robust` both accumulate non-zeros into
-  `std::map<std::pair<int,int>, double>`. At 1.4M COO entries the map
-  overhead dominates. A flat sorted vector + radix sort would shave
-  this to 1-2 s (independent of solver choice).
-* **Solve = 162 sec for 12 RHS.** CG iter count grows faster than √n
-  on character-topology cot-Laplacians; per-RHS cold-start is 13.5 s.
-  Warm-start halves it but doesn't fit the per-frame budget.
+* **Bind: 102000 ms → 166 ms (615× faster).** The previous bind
+  iterated `face_loop(m, face_id)` once per face, and each call did
+  a linear scan over all `nh` halfedges to find the face's start.
+  At 81k verts that's 159k × 482k ≈ 76 billion ops just to set up
+  the assembly. Replaced with `all_face_loops(m)` — a single O(nh)
+  pass that builds the loops for every face up-front. `std::map`
+  COO accumulation also replaced with a flat `std::vector<CooEntry>`
+  + sort+merge, which is `coo_to_csr`. Both fixes are independent
+  of solver choice and benefit every assemble call site.
+
+* **Solve = 163 sec for 12 RHS at 81k (unchanged).** CG iter count
+  grows faster than √n on character-topology cot-Laplacians; per-RHS
+  cold-start is 13.6 s. Warm-start halves it but the architecture
+  needs to change for the 11 ms / 90 FPS target — meshlet
+  decomposition or GPU compute remain the load-bearing options.
+
+The 5k bind drop (421 ms → 9 ms) is a 47× win on a path that
+was already fast enough; the win mostly matters at the 70k+ scale
+where the quadratic was the difference between "minute-long bind"
+and "interactive."
 
 The meshlet decomposition path (per-meshlet ~256×256 matrices solved
 independently with cached Cholesky) sidesteps both — per-meshlet bind
