@@ -11,7 +11,7 @@ Tracks three workloads: synthetic plane (smooth, well-conditioned),
 synthetic plane via dense LU (regression check for the historical
 path), and a real character mesh (Mire Quest body, 5485 verts).
 
-## Real character mesh — current ceiling
+## Real character mesh
 
 `Mire body` is loaded from `tests/mire_body_data.h` (baked from
 `demo/character/MireQuest.blend` via Blender MCP). Source:
@@ -19,21 +19,34 @@ path), and a real character mesh (Mire Quest body, 5485 verts).
 Curvenet is a single closed-loop with N hand-picked sample points
 projected to the closest body vertices.
 
+### Current — robust path (Sharp & Crane 2020 mollification)
+
+| label                       | nv   | nh    | nc | bind ms | frame ms | frames/s |
+|-----------------------------|------|-------|----|---------|----------|----------|
+| Mire body, 4-sample loop    | 5485 | 30856 | 4  |  421    |    91    |    11    |
+| Mire body, 8-sample loop    | 5485 | 30856 | 8  |  423    |    90    |    11    |
+
+11 FPS on the actual character mesh — interactive, not 90 Hz, but
+well into "playable" territory. This is the deployment-relevant
+number; the synthetic plane numbers below are diagnostic.
+
+### Before — non-robust cot (broken on real meshes)
+
+Until Sharp & Crane 2020 intrinsic mollification landed, the
+embedding-based cot in `polygon_laplacian.h` produced `±∞` off-
+diagonal entries on this mesh because cross-product magnitudes
+underflow on near-collinear edges. CG never converged:
+
 | label                       | nv   | nh    | nc | bind ms | frame ms | frames/s |
 |-----------------------------|------|-------|----|---------|----------|----------|
 | Mire body, 4-sample loop    | 5485 | 30856 | 4  |  293    | **5779** | **0.2**  |
 | Mire body, 8-sample loop    | 5485 | 30856 | 8  |  290    | **5782** | **0.2**  |
 
-**~5.8 seconds per frame.** This is the actual deployment-relevant
-number; everything below extrapolates from synthetic Laplacians and
-overstates real performance.
-
-The synthetic 70² plane at similar nh = 28842 reports 69 ms/frame.
-The 84× gap is **not** in the matrix size — it's in the conditioning
-of the cot-Laplacian on irregular character topology (skinny triangles,
-obtuse angles). CG iter count grows with √κ, and a 10⁴ jump in κ
-buys a ~100× jump in iter count, which is consistent with the
-measured frame time. See "Diagnosis path" below.
+The fix (commit landing this section): replace cot-from-embedding
+with cot-from-edge-lengths after intrinsic mollification — pad every
+edge by ε so the strict triangle inequality holds with margin δ at
+every corner, then compute cot via law-of-cosines + Heron. Now finite
+and convergent. **63× speedup at the same vertex count.**
 
 ## Synthetic plane — sparse + warm-start (the runtime path)
 
@@ -87,44 +100,51 @@ the LHS assembly (and LU factorisation for the dense row). Real
 `apply_deformation` also runs the curvenet build and sample promotion
 at bind, which adds a small constant.
 
-## Diagnosis path for the real-mesh result
+## How the robust path works
 
-Two questions to answer before reaching for a fix:
+`src/curvenet/robust_laplacian.h` mirrors
+`lean/Curvenet/RobustLaplacian.lean` and implements §4 of
+Sharp & Crane SGP 2020:
 
-1. **Is CG hitting the iteration cap?** Current `cg_max_iter = nv * 2`,
-   so 10970 iters per RHS column max. With 12 RHS per frame, hitting
-   the cap on every column gives ~131k iters per frame, which is in
-   the ballpark of the measured 5.8 s. If true: preconditioner problem.
-2. **Are `LhsM_csr` diagonal entries reasonable?** Cot weights on
-   obtuse triangles can be negative. Jacobi divides by `diag(A)`, so
-   negative or near-zero diagonals make the preconditioner produce
-   garbage and CG progress badly.
+1. **Edge lengths from the embedding.** For each triangle (a, b, c)
+   of every cut-face fan-triangulation, compute `eA = |b-c|`,
+   `eB = |a-c|`, `eC = |a-b|`.
+2. **Per-triangle ε.** For every corner the strict triangle
+   inequality reads `a + b > c + δ` where δ is a small safety
+   margin. Adding ε to every edge changes the inequality to
+   `(a+ε) + (b+ε) > (c+ε) + δ` ⇔ `ε > δ + c - a - b`. Per-triangle
+   required ε is the max over the three corners.
+3. **Global ε.** Take the max per-triangle ε across the whole
+   mesh — using one consistent ε keeps shared-edge contributions
+   in agreement.
+4. **Cot from mollified lengths.** Law of cosines + Heron's:
+   `cot θ = (e_adj1² + e_adj2² - e_opp²) / (4·area)`. With the
+   mollified lengths the area is bounded away from zero, so cot
+   is finite.
 
-Cheapest diagnostic: thread an iteration count + final residual through
-`sparse::cg_with_guess` and report mean iters / convergence ratio per
-frame in the bench. Then decide between:
-
-* Stronger preconditioner (incomplete Cholesky on `LhsM_csr`)
-* Robust polygon Laplacian (Sharp-Crane 2020 / Bunge et al 2020,
-  see `todos/07`) so the cot weights stay well-conditioned even on
-  hairy meshes
-* Mesh repair upstream (fTetWild manifold prepass per `todos/06`)
-  so the deformer never sees the worst topology
-* All of the above in some order
+We use δ = 1e-5 × mean edge length of the input mesh. On the Mire
+body that's 2.1e-7. The cot Laplacian on the resulting mesh has
+finite entries (off-diag dynamic range 10¹¹ vs `±∞` before) and CG
+converges.
 
 ## Next steps
 
-Pure CPU work, ranked by expected impact on the real-mesh row:
+Real-mesh row is now interactive. Remaining levers, ranked by
+expected impact for going from 11 FPS toward 90 FPS:
 
-1. Diagnose CG iter count + diagonal sanity on the Mire body.
-2. Robust polygon Laplacian per `todos/07_robust_laplacian_upgrade.md`.
-3. Incomplete Cholesky preconditioner.
-4. fTetWild manifold prepass per `todos/06_ftetwild_runtime_integration.md`.
-
-GPU work is **not** on this list. The CPU path needs to work on real
-character meshes before GPU optimisation has a load-bearing target.
-GPU progress is tracked separately in
-[docs/PERF_GPU.md](PERF_GPU.md).
+1. **Tighten convergence**: 11 FPS at n=5485 is dispatch-overhead-
+   light, so the cost is in CG iter count. Add iteration-count
+   instrumentation to confirm.
+2. **Intrinsic Delaunay flipping** (Sharp & Crane §5) on top of
+   mollification — guarantees nonneg edge weights and reduces κ
+   further. Bigger code change but the canonical fix.
+3. **Incomplete Cholesky preconditioner** on `LhsM_csr` to cut iter
+   count by 5-10×.
+4. **GPU compute path** finally has a load-bearing CPU baseline to
+   measure against. See [PERF_GPU.md](PERF_GPU.md).
+5. **fTetWild manifold prepass** per
+   `todos/06_ftetwild_runtime_integration.md` for meshes that fail
+   the manifold-edges precondition outright.
 
 ## When to re-run
 

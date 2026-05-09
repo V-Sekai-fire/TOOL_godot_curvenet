@@ -199,8 +199,9 @@ BenchRow run_sparse(int n, int frames) {
 	const std::size_t nh = c.base.he_count();
 
 	const double t_bind = now_ms();
-	const sp::SparseMatrixCSR Lh_csr   = cml::assemble_lh_csr(c, g.positions);
-	const sp::SparseMatrixCSR LhsM_csr = cml::assemble_vt_lh_v_csr(c, g.positions);
+	const double mol_delta = cml::default_mollify_delta(g.positions, g.tris);
+	const sp::SparseMatrixCSR Lh_csr   = cml::assemble_lh_csr_robust(c, g.positions, mol_delta);
+	const sp::SparseMatrixCSR LhsM_csr = cml::assemble_vt_lh_v_csr_robust(c, g.positions, mol_delta);
 	const double bind_ms = now_ms() - t_bind;
 
 	const std::vector<double> Fc = identity_fc();
@@ -371,8 +372,9 @@ RealRow run_real(const char *label, const LoadedMesh &m,
     const std::size_t nh = hm.he_count();
 
     const double t_bind = now_ms();
-    const sp::SparseMatrixCSR Lh_csr   = cml::assemble_lh_csr(c, m.positions);
-    const sp::SparseMatrixCSR LhsM_csr = cml::assemble_vt_lh_v_csr(c, m.positions);
+    const double mol_delta = cml::default_mollify_delta(m.positions, m.tris);
+    const sp::SparseMatrixCSR Lh_csr   = cml::assemble_lh_csr_robust(c, m.positions, mol_delta);
+    const sp::SparseMatrixCSR LhsM_csr = cml::assemble_vt_lh_v_csr_robust(c, m.positions, mol_delta);
     const double bind_ms = now_ms() - t_bind;
 
     auto sample_col = [](int curve_id, int /*sample_idx*/, bool /*side*/) {
@@ -530,8 +532,12 @@ int main(int argc, char ** /*argv*/) {
 			{  0.0,  0.0, 1.6 },   // chest
 			{  0.0,  0.0, 0.6 },   // pelvis
 		};
+		// Use a smaller frame count for the real-mesh row so we return
+		// even if convergence is unhappy — the synthetic plane rows
+		// run with the higher count above.
+		const int real_frames = 5;
 		real_rows.push_back(run_real("Mire body, 4-sample loop", mire,
-		                              samples_4, frames));
+		                              samples_4, real_frames));
 
 		const std::vector<Vec3> samples_8 = {
 			{  0.4,  0.0, 1.0 }, { -0.4,  0.0, 1.0 },
@@ -540,7 +546,7 @@ int main(int argc, char ** /*argv*/) {
 			{  0.5,  0.0, 1.5 }, { -0.5,  0.0, 1.5 },
 		};
 		real_rows.push_back(run_real("Mire body, 8-sample loop", mire,
-		                              samples_8, frames));
+		                              samples_8, real_frames));
 
 		print_real_table("DeGoes22 deformer — real character mesh (sparse + warm)",
 		                  real_rows);

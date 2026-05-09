@@ -150,11 +150,17 @@ test: $(TEST_BINS)
 		$$t || exit 1; \
 	done
 
-bin/bench_deform: bench_deform.cpp | bin
+bin/bench_deform: bench_deform.cpp mire_body_data.h | bin
 	$(CXX) $(BENCH_CXXFLAGS) -o $@ $<
 
 bench: bin/bench_deform
 	@bin/bench_deform
+
+bin/diag_real_mesh: diag_real_mesh.cpp mire_body_data.h | bin
+	$(CXX) $(BENCH_CXXFLAGS) -o $@ $<
+
+diag: bin/diag_real_mesh
+	@bin/diag_real_mesh
 
 clean:
 	rm -rf bin $(LIBRC)

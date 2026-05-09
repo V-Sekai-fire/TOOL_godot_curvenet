@@ -17,6 +17,7 @@ Modules organised by §:
 import Curvenet.Vec3
 import Curvenet.Halfedge
 import Curvenet.PolygonLaplacian
+import Curvenet.RobustLaplacian
 import Curvenet.CutMesh
 import Curvenet.ScaledFrames
 import Curvenet.DenseLinAlg

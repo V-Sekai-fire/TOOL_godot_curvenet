@@ -241,14 +241,19 @@ void CurveNetDeformer3D::apply_deformation() {
 			col_set[col] = true;
 		}
 
-		// Sparse rest-pose matrices: O(nh) memory + O(nh) bind work
-		// instead of the dense O(nh²) explosion (see docs/PERF_BASELINE.md).
+		// Sparse rest-pose matrices via Sharp & Crane 2020 intrinsic
+		// mollification — finite cot weights even on character meshes
+		// with degenerate triangles. The embedding-based path produces
+		// ±∞ on real input (Mire body) and CG fails to converge.
+		const double mollify_delta =
+			curvenet::cut_mesh_laplacian::default_mollify_delta(
+				rest_cache.positions, rest_cache.tri_indices);
 		rest_cache.Lh_csr =
-			curvenet::cut_mesh_laplacian::assemble_lh_csr(
-				rest_cache.cut_mesh, rest_cache.positions);
+			curvenet::cut_mesh_laplacian::assemble_lh_csr_robust(
+				rest_cache.cut_mesh, rest_cache.positions, mollify_delta);
 		rest_cache.LhsM_csr =
-			curvenet::cut_mesh_laplacian::assemble_vt_lh_v_csr(
-				rest_cache.cut_mesh, rest_cache.positions);
+			curvenet::cut_mesh_laplacian::assemble_vt_lh_v_csr_robust(
+				rest_cache.cut_mesh, rest_cache.positions, mollify_delta);
 
 		rest_cache.source_hash = hash_val;
 		rest_cache.valid = true;

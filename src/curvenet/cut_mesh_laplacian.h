@@ -18,6 +18,7 @@
 #include "dense_linalg.h"
 #include "halfedge.h"
 #include "polygon_laplacian.h"
+#include "robust_laplacian.h"
 #include "sparse_linalg.h"
 #include "vec3.h"
 
@@ -118,6 +119,155 @@ inline std::vector<double> assemble_vt_lh_v(const cut_mesh::CutMesh &m,
 // per-face contribution. Storing it as CSR pulls the assembly memory
 // from O(nh²) to O(nnz(Lₕ)) ≈ O(nh) and unlocks O(nnz)-per-iter
 // `spmv` for the per-frame solve.
+
+// Compute the global mollification ε across every fan-triangle of
+// every cut-face. Pass-1 helper for the robust assembly path.
+// `delta` is the safety margin Sharp & Crane recommend, scaled to a
+// small fraction of the mean edge length of the input mesh.
+inline double mollify_epsilon(const cut_mesh::CutMesh &m,
+                                const std::vector<Vec3> &positions,
+                                double delta) {
+    std::vector<std::vector<Vec3>> polys;
+    polys.reserve(m.base.face_count);
+    for (std::size_t f = 0; f < m.base.face_count; ++f) {
+        polys.push_back(face_polygon(m, positions, f));
+    }
+    return robust_laplacian::mollify_global(delta, polys);
+}
+
+// Default δ as a fraction of mean edge length. Sharp & Crane suggest
+// 1e-5; we use that. The result is then applied uniformly to every
+// edge of every fan-triangle of every cut-face.
+inline double default_mollify_delta(const std::vector<Vec3> &positions,
+                                       const std::vector<int> &tri_indices) {
+    double total = 0.0;
+    std::size_t n = 0;
+    for (std::size_t i = 0; i + 2 < tri_indices.size(); i += 3) {
+        const Vec3 &a = positions[tri_indices[i + 0]];
+        const Vec3 &b = positions[tri_indices[i + 1]];
+        const Vec3 &c = positions[tri_indices[i + 2]];
+        auto dist = [](const Vec3 &u, const Vec3 &v) {
+            const double dx = u.x - v.x;
+            const double dy = u.y - v.y;
+            const double dz = u.z - v.z;
+            return std::sqrt(dx * dx + dy * dy + dz * dz);
+        };
+        total += dist(a, b) + dist(b, c) + dist(a, c);
+        n += 3;
+    }
+    const double mean = (n > 0) ? (total / static_cast<double>(n)) : 1.0;
+    return 1e-5 * mean;
+}
+
+// Robust Lₕ assembly. Two passes:
+//   1. Walk every fan-triangle, gather edge lengths, find global ε
+//      via `robust_laplacian::mollify_triangle`.
+//   2. Build per-cut-face polygon Laplacian using mollified lengths,
+//      stitch into a CSR `nh × nh` matrix.
+// Output is finite even on input meshes with degenerate triangles —
+// the embedding-based path produces ±∞ in the same situations.
+inline sparse::SparseMatrixCSR assemble_lh_csr_robust(const cut_mesh::CutMesh &m,
+                                                          const std::vector<Vec3> &positions,
+                                                          double delta) {
+    const std::size_t nh = m.he_count();
+    const double eps = mollify_epsilon(m, positions, delta);
+
+    std::map<std::pair<int, int>, double> coo;
+    for (std::size_t f = 0; f < m.base.face_count; ++f) {
+        const std::vector<std::size_t> halfedges = face_loop(m, f);
+        const std::vector<Vec3> poly = face_polygon(m, positions, f);
+        const std::size_t nf = poly.size();
+        if (nf < 3) continue;
+        const std::vector<double> Lf =
+            robust_laplacian::polygon_cot_laplacian_with_epsilon(poly, eps);
+        for (std::size_t li = 0; li < nf; ++li) {
+            for (std::size_t lj = 0; lj < nf; ++lj) {
+                const int gi = static_cast<int>(halfedges[li]);
+                const int gj = static_cast<int>(halfedges[lj]);
+                const double v = polygon_laplacian::get_at(Lf, nf, li, lj);
+                if (v != 0.0) {
+                    coo[{ gi, gj }] += v;
+                }
+            }
+        }
+    }
+    sparse::SparseMatrixCSR out;
+    out.rows = nh;
+    out.cols = nh;
+    out.row_ptr.assign(nh + 1, 0);
+    for (auto &kv : coo) {
+        ++out.row_ptr[static_cast<std::size_t>(kv.first.first) + 1];
+    }
+    for (std::size_t i = 0; i < nh; ++i) {
+        out.row_ptr[i + 1] += out.row_ptr[i];
+    }
+    out.col_idx.resize(coo.size());
+    out.values.resize(coo.size());
+    std::vector<int> cursor = out.row_ptr;
+    for (auto &kv : coo) {
+        const int row = kv.first.first;
+        const int idx = cursor[row]++;
+        out.col_idx[idx] = kv.first.second;
+        out.values[idx]  = kv.second;
+    }
+    return out;
+}
+
+// Robust LhsM = Vᵀ·Lₕ·V assembly. Same fan-triangulation +
+// mollification as `assemble_lh_csr_robust`, but only includes
+// meshVertex × meshVertex entries (sample-promoted slots stay zero
+// so the constraint can be applied via overlay).
+inline sparse::SparseMatrixCSR assemble_vt_lh_v_csr_robust(const cut_mesh::CutMesh &m,
+                                                              const std::vector<Vec3> &positions,
+                                                              double delta) {
+    const std::size_t nv = m.vertex_count();
+    const double eps = mollify_epsilon(m, positions, delta);
+
+    std::map<std::pair<int, int>, double> coo;
+    for (std::size_t f = 0; f < m.base.face_count; ++f) {
+        const std::vector<std::size_t> halfedges = face_loop(m, f);
+        const std::vector<Vec3> poly = face_polygon(m, positions, f);
+        const std::size_t nf = poly.size();
+        if (nf < 3) continue;
+        const std::vector<double> Lf =
+            robust_laplacian::polygon_cot_laplacian_with_epsilon(poly, eps);
+        for (std::size_t li = 0; li < nf; ++li) {
+            const int va = cut_mesh::v_column_of(m, halfedges[li]);
+            if (va < 0) continue;
+            for (std::size_t lj = 0; lj < nf; ++lj) {
+                const int vb = cut_mesh::v_column_of(m, halfedges[lj]);
+                if (vb < 0) continue;
+                const double v = polygon_laplacian::get_at(Lf, nf, li, lj);
+                if (v != 0.0) {
+                    coo[{ va, vb }] += v;
+                }
+            }
+        }
+    }
+    for (std::size_t i = 0; i < nv; ++i) {
+        coo.insert({ { static_cast<int>(i), static_cast<int>(i) }, 0.0 });
+    }
+    sparse::SparseMatrixCSR out;
+    out.rows = nv;
+    out.cols = nv;
+    out.row_ptr.assign(nv + 1, 0);
+    for (auto &kv : coo) {
+        ++out.row_ptr[static_cast<std::size_t>(kv.first.first) + 1];
+    }
+    for (std::size_t i = 0; i < nv; ++i) {
+        out.row_ptr[i + 1] += out.row_ptr[i];
+    }
+    out.col_idx.resize(coo.size());
+    out.values.resize(coo.size());
+    std::vector<int> cursor = out.row_ptr;
+    for (auto &kv : coo) {
+        const int row = kv.first.first;
+        const int idx = cursor[row]++;
+        out.col_idx[idx] = kv.first.second;
+        out.values[idx]  = kv.second;
+    }
+    return out;
+}
 
 // Build Lₕ in CSR. Same per-cut-face polygon-Laplacian sum as
 // `assemble_lh`, but the sum is accumulated into a (row, col) → value
