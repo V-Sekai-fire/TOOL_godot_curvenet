@@ -277,7 +277,7 @@ inline void GpuCgSolver::prepare_matrix(const sp::SparseMatrixCSR &A) {
     // execute time (host-mapped, updated between submits), so the
     // same recorded CBs replay all iters with new alpha/beta.
     // ----------------------------------------------------------------
-    const std::uint32_t gx = (n_rows + 63) / 64;
+    const std::uint32_t gx = (n_rows + 255) / 256;
 
     // batch_spmv_pAp folds the previous iter's saxpby (p ← z + β·p)
     // into its prologue, saving one submit per iter. On iter 1 we set

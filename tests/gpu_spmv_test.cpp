@@ -162,7 +162,7 @@ std::vector<double> gpu_spmv(VulkanCompute &vk, SpmvPipeline &pipe,
     std::memset(y_buf.mapped, 0, rows * sizeof(float));
 
     pipe.bind_buffers(vk.device, params, row_ptr, col_idx, values, x_buf, y_buf);
-    const std::uint32_t groups = (rows + 63) / 64;
+    const std::uint32_t groups = (rows + 255) / 256;
     run_compute_once(vk, pipe.pipeline, pipe.layout, pipe.desc_set, groups);
 
     std::vector<double> y_out(rows, 0.0);

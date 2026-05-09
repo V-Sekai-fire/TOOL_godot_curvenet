@@ -118,7 +118,7 @@ std::vector<double> gpu_spmv_multi(VulkanCompute &vk,
 
     VkDescriptorSet ds = alloc_and_bind(vk.device, pool, pipe.kernel.dsl, params,
                                          { row_ptr, col_idx, values, x_buf, y_buf });
-    run_compute_once(vk, pipe.kernel.pipeline, pipe.kernel.layout, ds, (rows + 63) / 64);
+    run_compute_once(vk, pipe.kernel.pipeline, pipe.kernel.layout, ds, (rows + 255) / 256);
 
     std::vector<double> Y(rows * k, 0.0);
     {
@@ -289,7 +289,7 @@ int run_axpy_multi(VulkanCompute &vk, ComputeKernel &kernel, VkDescriptorPool po
     op.storage = { alpha, x, y };
     op.output_index = 2;  // Y is the output (in-place)
     op.output_count = n * k;
-    const std::vector<float> y_gpu = dispatch_op(vk, kernel, pool, (n * k + 63) / 64, op);
+    const std::vector<float> y_gpu = dispatch_op(vk, kernel, pool, (n * k + 255) / 256, op);
 
     std::vector<double> y_gpu_d(y_gpu.begin(), y_gpu.end());
     double worst = 0.0;
@@ -329,7 +329,7 @@ int run_jacobi_multi(VulkanCompute &vk, ComputeKernel &kernel, VkDescriptorPool 
     op.storage = { dvec, b, std::vector<float>(n * k, 0.0f) };
     op.output_index = 2;
     op.output_count = n * k;
-    const std::vector<float> y_gpu = dispatch_op(vk, kernel, pool, (n * k + 63) / 64, op);
+    const std::vector<float> y_gpu = dispatch_op(vk, kernel, pool, (n * k + 255) / 256, op);
     std::vector<double> y_gpu_d(y_gpu.begin(), y_gpu.end());
     double worst = 0.0;
     const bool ok = close_with_floor(y_ref, y_gpu_d, 1e-5, 1e-5, &worst);
@@ -366,7 +366,7 @@ int run_saxpby_multi(VulkanCompute &vk, ComputeKernel &kernel, VkDescriptorPool 
     op.storage = { alpha, beta, x, y, std::vector<float>(n * k, 0.0f) };
     op.output_index = 4;
     op.output_count = n * k;
-    const std::vector<float> out_gpu = dispatch_op(vk, kernel, pool, (n * k + 63) / 64, op);
+    const std::vector<float> out_gpu = dispatch_op(vk, kernel, pool, (n * k + 255) / 256, op);
     std::vector<double> out_gpu_d(out_gpu.begin(), out_gpu.end());
     double worst = 0.0;
     const bool ok = close_with_floor(out_ref, out_gpu_d, 1e-5, 1e-5, &worst);

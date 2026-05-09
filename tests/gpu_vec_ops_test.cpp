@@ -194,7 +194,7 @@ int test_axpy(VulkanCompute &vk) {
         const auto y32 = to_fp32(y0); std::memcpy(y_buf.mapped, y32.data(), n * sizeof(float));
 
         bind_buffers(vk.device, set, ubuf, { x_buf, y_buf });
-        run_compute_once(vk, pipe, pl, set, (n + 63) / 64);
+        run_compute_once(vk, pipe, pl, set, (n + 255) / 256);
 
         const auto y_gpu = to_fp64(static_cast<float *>(y_buf.mapped), n);
         // CPU reference: same fp32-rounded inputs, axpy_inplace mutates a copy.
@@ -267,7 +267,7 @@ int test_jacobi(VulkanCompute &vk) {
         std::memset(y_buf.mapped, 0, n * sizeof(float));
 
         bind_buffers(vk.device, set, ubuf, { d_buf, b_buf, y_buf });
-        run_compute_once(vk, pipe, pl, set, (n + 63) / 64);
+        run_compute_once(vk, pipe, pl, set, (n + 255) / 256);
 
         const auto y_gpu = to_fp64(static_cast<float *>(y_buf.mapped), n);
         std::vector<double> y_cpu(n);
@@ -335,7 +335,7 @@ int test_saxpby(VulkanCompute &vk) {
         std::memset(dst_buf.mapped, 0, n * sizeof(float));
 
         bind_buffers(vk.device, set, ubuf, { x_buf, y_buf, dst_buf });
-        run_compute_once(vk, pipe, pl, set, (n + 63) / 64);
+        run_compute_once(vk, pipe, pl, set, (n + 255) / 256);
 
         const auto y_gpu = to_fp64(static_cast<float *>(dst_buf.mapped), n);
         const float alpha_f = static_cast<float>(alpha);
