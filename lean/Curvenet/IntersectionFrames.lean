@@ -68,8 +68,16 @@ def cornerVectors (segs : Array OutgoingSegment) : Array Vec3 := Id.run do
     acc := acc.set! i (cross ti tiP)
   return acc
 
-/-- Corner normals `m_i = c_i / |c_i|`. Diverges if |c_i| = 0 (parallel
-   consecutive tangents — see file docstring). -/
+/-- Eps below which a corner-vector magnitude triggers the §3 T-junction
+   fallback instead of the direct `c_i / |c_i|` formula. -/
+private def degenerateEps : Float := 1.0e-12
+
+/-- Corner normals `m_i = c_i / |c_i|`, with the §3 T-junction fallback
+   `m_i = (c_{i+1} + c_{i−1}) / |c_{i+1} + c_{i−1}|` when |c_i| ≤ eps
+   (parallel consecutive tangents). If the fallback denominator is also
+   zero (degenerate triple-collinear configuration), returns the zero
+   vector at that index — an explicit signal of unrecoverable
+   degeneracy. -/
 def cornerNormals (segs : Array OutgoingSegment) : Array Vec3 := Id.run do
   let cs := cornerVectors segs
   let n := cs.size
@@ -77,8 +85,16 @@ def cornerNormals (segs : Array OutgoingSegment) : Array Vec3 := Id.run do
   for i in [0:n] do
     let c := cs[i]!
     let nrm := vec3Norm c
-    let inv := if nrm == 0.0 then 0.0 else 1.0 / nrm
-    acc := acc.set! i (vec3Scale inv c)
+    if nrm > degenerateEps then
+      acc := acc.set! i (vec3Scale (1.0 / nrm) c)
+    else
+      let cP := cs[(i + 1) % n]!
+      let cM := cs[(i + n - 1) % n]!
+      let sum : Vec3 := ⟨ cP.x + cM.x, cP.y + cM.y, cP.z + cM.z ⟩
+      let sNorm := vec3Norm sum
+      if sNorm > degenerateEps then
+        acc := acc.set! i (vec3Scale (1.0 / sNorm) sum)
+      -- else leave zero
   return acc
 
 /-- Per-side normals for each outgoing segment.
@@ -262,6 +278,47 @@ example :
     -- Both B^+ and B^- have row 0 column 0 = 1 (t·l), row 2 col 2 = ±1 (n·h).
     ((Bp[0]! - 1.0).abs < 1e-12 ∧ (Bp[8]! - 1.0).abs < 1e-12 ∧
      (Bm[0]! - 1.0).abs < 1e-12 ∧ (Bm[8]! + 1.0).abs < 1e-12) := by
+  native_decide
+
+/- ============================================================ -/
+/- T-junction degenerate fallback: at indices where consecutive  -/
+/- tangents are parallel, |c_i| = 0; the §3 fallback              -/
+/- m_i = (c_{i+1} + c_{i−1}) / |·| keeps the corner normal       -/
+/- well-defined and unit-length.                                  -/
+/- ============================================================ -/
+
+/-- T-junction shape: t_0 = +x and t_2 = −x are anti-parallel
+   (`c_2 = t_2 × t_0 = −x × +x = 0`); t_1 = +y branches off. The
+   degenerate corner is index 2; its fallback uses c_0 + c_1 = +z + +z
+   = 2·+z, normalised to +z. -/
+private def tJunction : Array OutgoingSegment :=
+  #[ ⟨⟨1.0, 0.0, 0.0⟩, 1.0⟩
+   , ⟨⟨0.0, 1.0, 0.0⟩, 1.0⟩
+   , ⟨⟨-1.0, 0.0, 0.0⟩, 1.0⟩ ]
+
+/-- |c_2| = 0 in the T-junction; the direct formula would NaN, but the
+   fallback keeps the normal at +z. -/
+example :
+    let cs := cornerVectors tJunction
+    -- c_2 = t_2 × t_0 = (−1,0,0) × (1,0,0) = (0,0,0).
+    cs[2]!.x.abs < 1e-12 ∧ cs[2]!.y.abs < 1e-12 ∧ cs[2]!.z.abs < 1e-12 := by
+  native_decide
+
+/-- All three corner normals come out as +z (the fallback at index 2
+   matches the directly-computed normals at indices 0 and 1). -/
+example :
+    let ms := cornerNormals tJunction
+    ((ms[0]!.z - 1.0).abs < 1e-12 ∧
+     (ms[1]!.z - 1.0).abs < 1e-12 ∧
+     (ms[2]!.z - 1.0).abs < 1e-12) := by
+  native_decide
+
+/-- The fallback returns a unit vector. -/
+example :
+    let ms := cornerNormals tJunction
+    let m  := ms[2]!
+    let nrm := vec3Norm m
+    (nrm - 1.0).abs < 1e-12 := by
   native_decide
 
 end IntersectionFramesExamples
