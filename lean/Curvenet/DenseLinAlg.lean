@@ -130,6 +130,89 @@ def solveMulti (n k : Nat) (A : Mat) (B : Mat) : Mat := Id.run do
       X := set X k i col xCol[i]!
   return X
 
+/-- Cached LU factorization with partial pivoting. Self-contained
+   replacement for Eigen's `SimplicialLLT` in the cut-mesh runtime —
+   factor once at bind time, reuse via `solveWithLU` for every per-frame
+   RHS column. The C++ mirror is `curvenet::dense::LUFactor`. -/
+structure LUFactor where
+  n     : Nat
+  a     : Mat                -- n×n; L below diagonal (unit, implicit), U on/above
+  piv   : Array Nat          -- row permutation from partial pivoting
+  valid : Bool
+deriving Repr, Inhabited
+
+/-- Factorize an n×n matrix into LU with partial pivoting. -/
+def factorizeLU (n : Nat) (Ain : Mat) : LUFactor := Id.run do
+  let mut a : Mat := Ain
+  let mut piv : Array Nat := Array.ofFn (n := n) (fun (i : Fin n) => i.val)
+  for k in [0:n] do
+    -- Partial pivot.
+    let mut pivotRow : Nat := k
+    let mut best : Float := (a[k * n + k]!).abs
+    for r in [k+1:n] do
+      let v := (a[r * n + k]!).abs
+      if v > best then
+        best := v
+        pivotRow := r
+    if pivotRow ≠ k then
+      for j in [0:n] do
+        let tmp := a[k * n + j]!
+        a := a.set! (k * n + j) a[pivotRow * n + j]!
+        a := a.set! (pivotRow * n + j) tmp
+      let tmpPiv := piv[k]!
+      piv := piv.set! k piv[pivotRow]!
+      piv := piv.set! pivotRow tmpPiv
+    let pivot := a[k * n + k]!
+    if pivot == 0.0 then
+      continue
+    for r in [k+1:n] do
+      let factor := a[r * n + k]! / pivot
+      a := a.set! (r * n + k) factor
+      for j in [k+1:n] do
+        let nv := a[r * n + j]! - factor * a[k * n + j]!
+        a := a.set! (r * n + j) nv
+  return { n := n, a := a, piv := piv, valid := true }
+
+/-- Solve A·x = b using a precomputed LU factorization. O(n²). -/
+def solveWithLU (f : LUFactor) (b : Array Float) : Array Float := Id.run do
+  let n := f.n
+  if !f.valid then return Array.replicate n 0.0
+  if b.size ≠ n then return Array.replicate n 0.0
+  -- Apply row permutation: y = P b
+  let mut y : Array Float := Array.replicate n 0.0
+  for i in [0:n] do
+    y := y.set! i b[f.piv[i]!]!
+  -- Forward sub: L y = (P b), L unit lower triangular (diagonal implicit).
+  for i in [0:n] do
+    let mut s : Float := y[i]!
+    for j in [0:i] do
+      s := s - f.a[i * n + j]! * y[j]!
+    y := y.set! i s
+  -- Back sub: U x = y.
+  let mut x : Array Float := Array.replicate n 0.0
+  for i in [0:n] do
+    let row := n - 1 - i
+    let mut s : Float := y[row]!
+    for j in [row+1:n] do
+      s := s - f.a[row * n + j]! * x[j]!
+    let pivot := f.a[row * n + row]!
+    let v := if pivot == 0.0 then 0.0 else s / pivot
+    x := x.set! row v
+  return x
+
+/-- Multi-column solve sharing one LU factorization. -/
+def solveMultiWithLU (f : LUFactor) (k : Nat) (B : Mat) : Mat := Id.run do
+  let n := f.n
+  let mut X : Mat := zeros n k
+  for col in [0:k] do
+    let mut bCol : Array Float := Array.replicate n 0.0
+    for i in [0:n] do
+      bCol := bCol.set! i (get B k i col)
+    let xCol := solveWithLU f bCol
+    for i in [0:n] do
+      X := set X k i col xCol[i]!
+  return X
+
 /-- Element-wise tolerance check for matrices in row-major form. -/
 def matWithinEps (a b : Mat) (n m : Nat) (eps : Float) : Bool := Id.run do
   for i in [0:n] do
@@ -199,6 +282,89 @@ example :
     let AtA := matMul 3 3 3 At A
     let AtAt := transpose 3 3 AtA
     matWithinEps AtA AtAt 3 3 1e-12 = true := by native_decide
+
+/- ============================================================ -/
+/- LU factorization (cached, factor-once-solve-many) checks.    -/
+/- The C++ runtime caches one of these on RestCache and reuses  -/
+/- it for every per-frame RHS column — same role Eigen's        -/
+/- `SimplicialLLT` would play, but self-contained.              -/
+/- ============================================================ -/
+
+/-- Identity round-trip: factorize I, solve I·x = b, recover b. -/
+example :
+    let A := identity 3
+    let f := factorizeLU 3 A
+    let b : Array Float := #[1.0, 2.0, 3.0]
+    let x := solveWithLU f b
+    vecWithinEps x b 1e-12 = true := by native_decide
+
+/-- Diagonal solve via LU: diag(2, 3, 4)·x = (4, 9, 16) ⇒ x = (2, 3, 4). -/
+example :
+    let A : Mat := #[2.0, 0.0, 0.0,
+                      0.0, 3.0, 0.0,
+                      0.0, 0.0, 4.0]
+    let f := factorizeLU 3 A
+    let b : Array Float := #[4.0, 9.0, 16.0]
+    let x := solveWithLU f b
+    vecWithinEps x #[2.0, 3.0, 4.0] 1e-12 = true := by native_decide
+
+/-- 2×2 SPD solve via LU matches the in-place Gaussian elimination from
+   the original slice 5 routine. -/
+example :
+    let A : Mat := #[2.0, 1.0, 1.0, 2.0]
+    let f := factorizeLU 2 A
+    let b : Array Float := #[3.0, 3.0]
+    let x := solveWithLU f b
+    vecWithinEps x #[1.0, 1.0] 1e-12 = true := by native_decide
+
+/-- Pivoting required: leading-zero pivot triggers a row swap recorded
+   in `f.piv`; solving still recovers the right answer. -/
+example :
+    let A : Mat := #[0.0, 1.0, 1.0, 0.0]
+    let f := factorizeLU 2 A
+    let b : Array Float := #[2.0, 3.0]
+    let x := solveWithLU f b
+    vecWithinEps x #[3.0, 2.0] 1e-12 = true := by native_decide
+
+/-- Round-trip: A·x reproduces b after factor + solve on a tridiagonal
+   SPD example. -/
+example :
+    let A : Mat := #[2.0, 1.0, 0.0,
+                      1.0, 2.0, 1.0,
+                      0.0, 1.0, 2.0]
+    let f := factorizeLU 3 A
+    let b : Array Float := #[5.0, 6.0, 9.0]
+    let x := solveWithLU f b
+    let bAgain : Array Float :=
+      #[ A[0]! * x[0]! + A[1]! * x[1]! + A[2]! * x[2]!
+       , A[3]! * x[0]! + A[4]! * x[1]! + A[5]! * x[2]!
+       , A[6]! * x[0]! + A[7]! * x[1]! + A[8]! * x[2]! ]
+    vecWithinEps bAgain b 1e-10 = true := by native_decide
+
+/-- Multi-column solve sharing one factorization: identity LHS
+   reproduces the RHS columns unchanged. -/
+example :
+    let A := identity 3
+    let f := factorizeLU 3 A
+    let B : Mat := #[1.0, 2.0, 3.0,
+                      4.0, 5.0, 6.0,
+                      7.0, 8.0, 9.0]
+    let X := solveMultiWithLU f 3 B
+    matWithinEps X B 3 3 1e-12 = true := by native_decide
+
+/-- `solveWithLU` agrees with the slice-5 single-shot `solve` on a
+   non-trivial system. The factor-once-solve-many refactor is
+   semantics-preserving (factorization adds no error beyond the
+   underlying Gaussian elimination). -/
+example :
+    let A : Mat := #[4.0, 3.0, 0.0,
+                      6.0, 3.0, 0.0,
+                      0.0, 0.0, 1.0]
+    let b : Array Float := #[7.0, 9.0, 1.0]
+    let xDirect := solve 3 A b
+    let f := factorizeLU 3 A
+    let xLU := solveWithLU f b
+    vecWithinEps xDirect xLU 1e-10 = true := by native_decide
 
 end LinAlgExamples
 

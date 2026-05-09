@@ -145,6 +145,115 @@ inline std::vector<double> solve_multi(std::size_t n, std::size_t k,
 	return X;
 }
 
+// LU factorization with partial pivoting. Self-contained replacement for
+// Eigen's `SimplicialLLT` — same factor-once / solve-many semantics, no
+// new thirdparty dependency. For symmetric positive-definite inputs this
+// is asymptotically twice the factorization cost of Cholesky but the
+// per-RHS solve cost is identical (both `O(n²)`), and the factorization
+// only runs once at bind time.
+struct LUFactor {
+	std::size_t        n     = 0;
+	std::vector<double> a;          // n×n; lower triangular (unit diagonal,
+	                                  // implicit) below the diagonal,
+	                                  // upper triangular on/above
+	std::vector<int>   piv;          // row permutation from partial pivoting
+	bool               valid = false;
+};
+
+inline LUFactor factorize_lu(std::size_t n, const std::vector<double> &A_in) {
+	LUFactor f;
+	f.n = n;
+	f.a = A_in;
+	f.piv.resize(n);
+	for (std::size_t i = 0; i < n; ++i) {
+		f.piv[i] = static_cast<int>(i);
+	}
+	for (std::size_t k = 0; k < n; ++k) {
+		std::size_t pivot_row = k;
+		double best = std::abs(f.a[k * n + k]);
+		for (std::size_t r = k + 1; r < n; ++r) {
+			const double v = std::abs(f.a[r * n + k]);
+			if (v > best) {
+				best = v;
+				pivot_row = r;
+			}
+		}
+		if (pivot_row != k) {
+			for (std::size_t j = 0; j < n; ++j) {
+				std::swap(f.a[k * n + j], f.a[pivot_row * n + j]);
+			}
+			std::swap(f.piv[k], f.piv[pivot_row]);
+		}
+		const double pivot = f.a[k * n + k];
+		if (pivot == 0.0) {
+			continue; // singular column; zero row in LHS (e.g. promoted-
+			          // vertex slot). Solve will return 0 here.
+		}
+		for (std::size_t r = k + 1; r < n; ++r) {
+			const double factor = f.a[r * n + k] / pivot;
+			f.a[r * n + k] = factor;
+			for (std::size_t j = k + 1; j < n; ++j) {
+				f.a[r * n + j] -= factor * f.a[k * n + j];
+			}
+		}
+	}
+	f.valid = true;
+	return f;
+}
+
+// Solve A·x = b given a previously-computed LU factorization. O(n²).
+inline std::vector<double> solve_with_lu(const LUFactor &f,
+                                          const std::vector<double> &b) {
+	const std::size_t n = f.n;
+	std::vector<double> x(n, 0.0);
+	if (!f.valid || b.size() != n) {
+		return x;
+	}
+	// Apply row permutation: y = P b
+	std::vector<double> y(n, 0.0);
+	for (std::size_t i = 0; i < n; ++i) {
+		y[i] = b[f.piv[i]];
+	}
+	// Forward substitution: L y = (Pb), L unit lower triangular.
+	for (std::size_t i = 0; i < n; ++i) {
+		double sum = y[i];
+		for (std::size_t j = 0; j < i; ++j) {
+			sum -= f.a[i * n + j] * y[j];
+		}
+		y[i] = sum;
+	}
+	// Back substitution: U x = y.
+	for (std::size_t i = 0; i < n; ++i) {
+		const std::size_t row = n - 1 - i;
+		double sum = y[row];
+		for (std::size_t j = row + 1; j < n; ++j) {
+			sum -= f.a[row * n + j] * x[j];
+		}
+		const double pivot = f.a[row * n + row];
+		x[row] = (pivot == 0.0) ? 0.0 : sum / pivot;
+	}
+	return x;
+}
+
+// Solve A·X = B for k RHS columns using a precomputed LU factor. Each
+// column is back-substituted independently, sharing the cached factor.
+inline std::vector<double> solve_multi_with_lu(const LUFactor &f, std::size_t k,
+                                                  const std::vector<double> &B) {
+	const std::size_t n = f.n;
+	std::vector<double> X(n * k, 0.0);
+	std::vector<double> b_col(n, 0.0);
+	for (std::size_t col = 0; col < k; ++col) {
+		for (std::size_t i = 0; i < n; ++i) {
+			b_col[i] = B[i * k + col];
+		}
+		const std::vector<double> x_col = solve_with_lu(f, b_col);
+		for (std::size_t i = 0; i < n; ++i) {
+			X[i * k + col] = x_col[i];
+		}
+	}
+	return X;
+}
+
 inline bool vec_within_eps(const std::vector<double> &a, const std::vector<double> &b, double eps) {
 	if (a.size() != b.size()) {
 		return false;
