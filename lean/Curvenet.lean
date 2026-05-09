@@ -19,3 +19,4 @@ import Curvenet.Bezier
 import Curvenet.CoonsPatch
 import Curvenet.NgonPatch
 import Curvenet.MeanValue
+import Curvenet.Halfedge
