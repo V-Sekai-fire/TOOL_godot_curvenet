@@ -162,6 +162,27 @@ bin/diag_real_mesh: diag_real_mesh.cpp mire_body_data.h | bin
 diag: bin/diag_real_mesh
 	@bin/diag_real_mesh
 
+# meshoptimizer — vendored under thirdparty/meshoptimizer. Compile its
+# .cpp sources directly into the meshlet diagnostic; no static lib step,
+# the whole library is small.
+MESHOPT_DIR := $(PROJECT_ROOT)/thirdparty/meshoptimizer
+MESHOPT_SRC := $(wildcard $(MESHOPT_DIR)/src/*.cpp)
+MESHOPT_OBJ := $(MESHOPT_SRC:.cpp=.o)
+MESHOPT_CXXFLAGS := -std=c++14 -O3 -DNDEBUG -Wall -Wno-missing-braces
+
+ifeq ($(UNAME_S),Darwin)
+  MESHOPT_CXXFLAGS += -stdlib=libc++
+endif
+
+$(MESHOPT_DIR)/src/%.o: $(MESHOPT_DIR)/src/%.cpp
+	$(CXX) $(MESHOPT_CXXFLAGS) -c $< -o $@
+
+bin/diag_meshlet: diag_meshlet.cpp mire_body_data.h $(MESHOPT_OBJ) | bin
+	$(CXX) $(BENCH_CXXFLAGS) -I$(MESHOPT_DIR)/src -o $@ $< $(MESHOPT_OBJ)
+
+diag_meshlet: bin/diag_meshlet
+	@bin/diag_meshlet
+
 clean:
 	rm -rf bin $(LIBRC)
 	find $(RC)/src -name "*.o" -delete
