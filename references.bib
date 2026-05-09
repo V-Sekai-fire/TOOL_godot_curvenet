@@ -125,6 +125,57 @@
 }
 
 % =================================================================
+% Mixed-precision iterative refinement — the GPU CG path in todos/08
+% runs the inner solve in fp32 (the only realistic precision on
+% Adreno / RDNA-2 mobile compute) and recovers fp64-quality accuracy
+% via a single fp64 residual + correction step on the CPU. These two
+% papers are the canonical references for the technique; Carson &
+% Higham 2018 generalises to three precisions (fp16/fp32/fp64) which
+% becomes interesting once we move to fused tensor-core shaders.
+% =================================================================
+
+@article{Buttari2008MixedPrecision,
+  author  = {Buttari, Alfredo and Dongarra, Jack and Langou, Julie and
+             Langou, Julien and Luszczek, Piotr and Kurzak, Jakub},
+  title   = {Mixed Precision Iterative Refinement Techniques for the
+             Solution of Dense Linear Systems},
+  journal = {The International Journal of High Performance Computing
+             Applications},
+  volume  = {21},
+  number  = {4},
+  year    = {2008},
+  pages   = {457--466},
+  doi     = {10.1177/1094342007084026}
+}
+
+@article{Carson2018IterativeRefinement,
+  author  = {Carson, Erin and Higham, Nicholas J.},
+  title   = {Accelerating the Solution of Linear Systems by Iterative
+             Refinement in Three Precisions},
+  journal = {SIAM Journal on Scientific Computing},
+  volume  = {40},
+  number  = {2},
+  year    = {2018},
+  pages   = {A817--A847},
+  doi     = {10.1137/17M1140819}
+}
+
+% Double-float (df32) arithmetic — represent each value as a pair of
+% fp32 carries to recover ~48 bits of mantissa without paying for native
+% fp64. Useful as a fallback if we ever can't afford the CPU residual
+% roundtrip on Quest 3, but the inner kernels become 3-8x slower per
+% op + 2x memory bandwidth, so iterative refinement (Buttari/Carson) is
+% the cheaper default.
+@inproceedings{DaGraca2006FloatFloat,
+  author    = {Da Gra\c{c}a, Guillaume and Defour, David},
+  title     = {Implementation of Float-Float Operators on Graphics
+               Hardware},
+  booktitle = {Real Numbers and Computers (RNC 7)},
+  year      = {2006},
+  pages     = {23--32}
+}
+
+% =================================================================
 % Manifold pre-processor — todos/06 locks in fTetWild as the runtime
 % manifold-repair pass before the cut-mesh algorithm runs.
 % =================================================================

@@ -72,4 +72,11 @@ tests/bin/*
 !tests/bin/.gitkeep
 *.dSYM/
 
+# Compiled shaders — produced by glslangValidator at test/build time.
+# The .comp source under src/curvenet/shaders/ is tracked; the .spv
+# output is regenerated and stays out of the tree. (Godot will compile
+# and cache its own SPIR-V at runtime when these shaders move into
+# the RenderingDevice path; that cache lives under .godot/.)
+*.spv
+
 src/gen/

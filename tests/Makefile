@@ -34,8 +34,45 @@ ifeq ($(UNAME_S),Darwin)
   BENCH_CXXFLAGS += -stdlib=libc++
 endif
 
-.PHONY: all test bench clean
+.PHONY: all test bench gpu clean
 all: $(TEST_BINS)
+
+# ----------------------------------------------------------------
+# Standalone GPU compute test — Vulkan + MoltenVK on macOS, no Godot.
+# Compiles src/curvenet/shaders/spmv.comp to SPIR-V via glslangValidator
+# and dispatches it through a thin Vulkan wrapper, comparing the result
+# to curvenet::sparse::spmv on a few SPD systems.
+# ----------------------------------------------------------------
+
+GLSLANG ?= $(shell command -v glslangValidator 2>/dev/null)
+
+ifeq ($(UNAME_S),Darwin)
+  VULKAN_PREFIX  ?= $(shell brew --prefix vulkan-loader 2>/dev/null)
+  VULKAN_HEADERS ?= $(shell brew --prefix vulkan-headers 2>/dev/null)/include
+  MOLTENVK_PREFIX ?= $(shell brew --prefix molten-vk 2>/dev/null)
+  GPU_CXXFLAGS    := -std=c++14 -O2 -g -Wall -Wno-missing-braces \
+                     -I$(SRC) -I$(VULKAN_HEADERS) -stdlib=libc++ -MMD -MP
+  GPU_LDFLAGS     := -L$(VULKAN_PREFIX)/lib -lvulkan \
+                     -Wl,-rpath,$(VULKAN_PREFIX)/lib
+  GPU_RUN_ENV     := DYLD_FALLBACK_LIBRARY_PATH=$(MOLTENVK_PREFIX)/lib \
+                     VK_ICD_FILENAMES=$(MOLTENVK_PREFIX)/etc/vulkan/icd.d/MoltenVK_icd.json
+else
+  GPU_CXXFLAGS    := -std=c++14 -O2 -g -Wall -Wno-missing-braces -I$(SRC) -MMD -MP
+  GPU_LDFLAGS     := -lvulkan
+  GPU_RUN_ENV     :=
+endif
+
+bin/spmv.spv: $(SRC)/curvenet/shaders/spmv.comp | bin
+ifeq ($(GLSLANG),)
+	$(error glslangValidator not found. Install with: brew install glslang)
+endif
+	$(GLSLANG) -V $< -o $@
+
+bin/gpu_spmv_test: gpu_spmv_test.cpp | bin
+	$(CXX) $(GPU_CXXFLAGS) -o $@ $< $(GPU_LDFLAGS)
+
+gpu: bin/gpu_spmv_test bin/spmv.spv
+	@$(GPU_RUN_ENV) bin/gpu_spmv_test bin/spmv.spv
 
 $(LIBRC): $(RC_OBJ)
 	ar rcs $@ $(RC_OBJ)
@@ -71,3 +108,5 @@ clean:
 	rm -rf bin $(LIBRC)
 	find $(RC)/src -name "*.o" -delete
 	find $(SRC)/curvenet -name "*.o" -delete 2>/dev/null || true
+
+-include bin/gpu_spmv_test.d
