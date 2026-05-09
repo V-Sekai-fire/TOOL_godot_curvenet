@@ -43,11 +43,24 @@ fixed:
   + sort+merge, which is `coo_to_csr`. Both fixes are independent
   of solver choice and benefit every assemble call site.
 
-* **Solve = 163 sec for 12 RHS at 81k (unchanged).** CG iter count
-  grows faster than √n on character-topology cot-Laplacians; per-RHS
-  cold-start is 13.6 s. Warm-start halves it but the architecture
-  needs to change for the 11 ms / 90 FPS target — meshlet
-  decomposition or GPU compute remain the load-bearing options.
+* **Solve = 163 sec for 12 RHS at 81k (still architectural).**
+  Instrumented CG (`sparse::cg_diag`) reports **20,668 iters at
+  0.655 ms each per RHS**. Per-iter cost is fine; iter count is the
+  problem. κ ≈ 4×10⁸ → √κ ≈ 20k matches the measurement. Even with
+  a 10× preconditioner improvement (incomplete Cholesky / multigrid)
+  the monolithic CPU path lands at ~17 sec/frame — 1500× over 11 ms.
+
+* **Meshlet CPU path measured at 81k.** `diag_meshlet_pcg_chol_70k`
+  on the same mesh: 368 meshlets, bind 766 ms (build + Cholesky
+  factor every local), per outer iter 64.7 ms. Convergence rate
+  ~0.97/iter once past the early phase, so ~670 outer iters to
+  reach 1e-9 → ~43 sec/frame. ~4× better than monolithic but
+  still 4000× over budget.
+
+The CPU has been stretched as far as Gall's-law evolution allows.
+GPU compute is the only path that fits 11 ms / 90 FPS at 81k. The
+existing `tests/gpu_cg_multi_solver.h` is validated on synthetic
+SPD systems and ready to be wired against meshlet locals.
 
 The 5k bind drop (421 ms → 9 ms) is a 47× win on a path that
 was already fast enough; the win mostly matters at the 70k+ scale
