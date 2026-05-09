@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 #include "register_types.h"
 
+#include "curvenet_deformer_3d.h"
+
 #include <gdextension_interface.h>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/defs.hpp>
@@ -13,9 +15,7 @@ void initialize_gdextension_types(ModuleInitializationLevel p_level) {
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
 		return;
 	}
-	// Cycle 6 will register the Godot-side classes here.
-	// For now, the pure-math algorithms live under src/curvenet/ and are
-	// exercised by the rapidcheck test suite in tests/.
+	ClassDB::register_class<CurveNetDeformer3D>();
 }
 
 void uninitialize_gdextension_types(ModuleInitializationLevel p_level) {
