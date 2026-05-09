@@ -1,24 +1,20 @@
 /-
-Lean4 formalization of the CurveNet math layer.
+Lean4 formalization of the CurveNet math layer (DeGoes22 + slicing).
 
-Mirrors the rapidcheck property tests in tests/. Proofs here are over real-valued
-3-vectors and the cubic Bezier / Coons patch constructions in src/curvenet/.
+Mirrors the per-slice C++ runtime under `src/curvenet/`. Each module
+contains its own `native_decide` instance proofs of the algorithm's
+load-bearing invariants on small concrete examples.
 
-Status:
-- bezierBasis sums to 1 ........................... ✓ proven
-- bezier 0 = p0, bezier 1 = p3 .................... ✓ proven
-- coincident control points → constant ............ ✓ proven
-- coons evaluates corners exactly ................. ✓ proven
-- coons recovers u0/u1/v0/v1 boundaries ........... ✓ proven (translation-invariant by partition of unity)
-- translation invariance of bezier ................ ✓ proven
-- N=4 NgonPatch ↔ CoonsPatch equivalence .......... TODO (definitional once NgonPatch is encoded)
+Modules organised by §:
+  Vec3, ScaledFrames, IntersectionFrames, CurveInterp, SegmentGradient
+                                  — DeGoes22 §3 curvenet representation
+  Halfedge, PolygonLaplacian, CutMesh, CutMeshLaplacian, CutAlgorithm
+                                  — §4.1 cut-mesh + §4.2 discretization
+  DenseLinAlg, SparseLinAlg       — solver kernels (LU + sparse CG)
+  HarmonicSolve, DeformSolve      — §4.3 two-stage solve
 -/
 
 import Curvenet.Vec3
-import Curvenet.Bezier
-import Curvenet.CoonsPatch
-import Curvenet.NgonPatch
-import Curvenet.MeanValue
 import Curvenet.Halfedge
 import Curvenet.PolygonLaplacian
 import Curvenet.CutMesh

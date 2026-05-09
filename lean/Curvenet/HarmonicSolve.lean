@@ -29,39 +29,6 @@ import Curvenet.Vec3
 namespace Curvenet
 namespace HarmonicSolve
 
-/-- Build C·f_c as a per-halfedge vector: each halfedge whose target is a
-   curvenet sample picks up the sample's value; other halfedges are zero. -/
-def computeCfc (m : CutMesh) (sampleColumn : Nat → Nat → Bool → Nat)
-    (fc : Array Float) : Array Float := Id.run do
-  let nh := m.heCount
-  let mut out : Array Float := Array.replicate nh 0.0
-  for h in [0:nh] do
-    match m.cColumnOf h sampleColumn with
-    | some c => out := out.set! h fc[c]!
-    | none => pure ()
-  return out
-
-/-- Solve (VᵀLₕV) x_v = − Vᵀ Lₕ (C f_c) for x_v.
-
-   `nc` is the total sample-column count (size of `fc`).
-   `sampleColumn` packs (curveId, sampleIdx, side) → column index. -/
-def solveScalar (m : CutMesh) (positions : Array Vec3)
-    (sampleColumn : Nat → Nat → Bool → Nat)
-    (fc : Array Float) : Array Float :=
-  let nh := m.heCount
-  let nv := m.vertexCount
-  let Lh := CutMeshLaplacian.assembleLh m positions
-  let V  := CutMeshLaplacian.assembleV m
-  let Vt := DenseLinAlg.transpose nh nv V
-  let LhV := DenseLinAlg.matMul nh nh nv Lh V
-  let lhs := DenseLinAlg.matMul nv nh nv Vt LhV
-  let cfc := computeCfc m sampleColumn fc
-  let LhCfc := DenseLinAlg.matVec nh nh Lh cfc
-  let VtLhCfc := DenseLinAlg.matVec nv nh Vt LhCfc
-  -- RHS = − Vᵀ Lₕ C f_c
-  let rhs : Array Float := VtLhCfc.map (fun x => -x)
-  DenseLinAlg.solve nv lhs rhs
-
 /-- Build the per-halfedge nh × k matrix from a per-sample nc × k sample
    matrix `Fc`: row `h` is `Fc[cColumnOf h]` if the halfedge has a sample
    target, else zeros. -/
@@ -118,34 +85,9 @@ private def triPositions : Array Vec3 :=
 /-- One sample (vertex 0 promoted) → column 0. -/
 private def oneSample : Nat → Nat → Bool → Nat := fun _ _ _ => 0
 
-/-- Sample value 5.0 with a single sample column. -/
-private def fc : Array Float := #[5.0]
-
-/-- Trivial harmonic solve: with vertex 0 fixed to 5.0, the cot-Laplacian
-   harmonic minimum on an equilateral triangle puts every other vertex
-   at the same value (5.0). The promoted slot (index 0) returns 0 from
-   the degenerate solve, but the *unpromoted* vertices 1 and 2 are
-   harmonic-interpolated and equal 5.0. -/
-example :
-    let xv := solveScalar CutExamples.triangleWithSample triPositions oneSample fc
-    ((xv[1]! - 5.0).abs < 1e-9 && (xv[2]! - 5.0).abs < 1e-9) = true := by
-  native_decide
-
-/-- The promoted-vertex slot is zeroed by Gaussian elimination on the
-   degenerate row (it carries no harmonic energy in the system). -/
-example :
-    let xv := solveScalar CutExamples.triangleWithSample triPositions oneSample fc
-    (xv[0]!.abs < 1e-12) = true := by
-  native_decide
-
-/-- A different sample value: setting fc=[2.5] should give vertices 1, 2
-   the value 2.5 (linearity of the Laplacian solve). -/
-example :
-    let xv := solveScalar CutExamples.triangleWithSample triPositions oneSample #[2.5]
-    ((xv[1]! - 2.5).abs < 1e-9 && (xv[2]! - 2.5).abs < 1e-9) = true := by
-  native_decide
-
-/- Multi-column solve checks: same problem but several RHS columns at once. -/
+/- Multi-column solve checks: same problem but several RHS columns at once.
+   `solveMulti` at k = 1 covers what the removed `solveScalar` used to
+   prove; the cases below exercise k = 3 and k = 9. -/
 
 /-- 3-column case (vertex positions). With sample value (5, 10, 15), the
    harmonic solve yields (5, 10, 15) at the unpromoted vertices. -/
