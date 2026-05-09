@@ -31,3 +31,4 @@ import Curvenet.CurveInterp
 import Curvenet.SegmentGradient
 import Curvenet.ChebyshevAccel
 import Curvenet.TwoLevelSchwarz
+import Curvenet.MultiLevelSchwarz
