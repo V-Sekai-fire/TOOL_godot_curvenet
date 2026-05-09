@@ -110,13 +110,22 @@ double CurveNetDeformer3D::get_length_tiebreak() const {
 
 void CurveNetDeformer3D::set_deformation_active(bool p_v) {
 	deformation_active = p_v;
-	if (deformation_active) {
+	// Properties are set during scene load before the node is in the tree, so
+	// `get_node_or_null(source_path)` would resolve to null and emit a spurious
+	// error. Defer the first apply until `_ready` once the scene is wired up.
+	if (deformation_active && is_inside_tree()) {
 		apply_deformation();
 	}
 }
 
 bool CurveNetDeformer3D::is_deformation_active() const {
 	return deformation_active;
+}
+
+void CurveNetDeformer3D::_ready() {
+	if (deformation_active) {
+		apply_deformation();
+	}
 }
 
 void CurveNetDeformer3D::apply_deformation() {

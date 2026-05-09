@@ -65,6 +65,8 @@ public:
 	void set_deformation_active(bool p_v);
 	bool is_deformation_active() const;
 
+	void _ready() override;
+
 	// Recompute the deformed mesh from the current profile_curves and apply
 	// it to this MeshInstance3D's mesh. Cheap on subsequent calls because
 	// the rest-pose tri->quad fusion + binding is cached.
