@@ -307,7 +307,10 @@ int main(int argc, char **argv) {
     // contraction at this scale, so rho ≈ 0.97 is the right spectral
     // estimate. Tune empirically.
     std::printf("Chebyshev-accelerated outer Schwarz, sweeping rho:\n");
-    for (const double rho : { 0.95, 0.97, 0.98, 0.985, 0.99, 0.993, 0.995 }) {
+    // At 81k, plain Schwarz contracts at ~0.99973/iter (368 meshlets,
+    // 1-ring overlap). The 5k optimum (rho=0.98) is way too small;
+    // for 81k we need rho close to the actual contraction rate.
+    for (const double rho : { 0.997, 0.999, 0.9995, 0.9997, 0.9999, 0.99995, 0.99997 }) {
         std::vector<double> x(nv, 0.0);
         std::vector<double> x_prev = x;
         std::vector<double> x_curr = x;
