@@ -146,6 +146,36 @@ the LHS assembly (and LU factorisation for the dense row). Real
 `apply_deformation` also runs the curvenet build and sample promotion
 at bind, which adds a small constant.
 
+## Chebyshev acceleration on the meshlet Schwarz path
+
+`tests/diag_meshlet_chebyshev_5k.cpp` wraps the per-meshlet
+multiplicative-Schwarz outer iteration with Wang 2015's Chebyshev
+semi-iterative recurrence (`src/curvenet/chebyshev_accel.h`,
+mirroring `lean/Curvenet/ChebyshevAccel.lean`). On the 5k Mire
+body with synthetic SPD-projected RHS, tol 1e-9:
+
+| Configuration                   | Outer iters to 1e-9 |
+|---------------------------------|---------------------|
+| Plain multiplicative Schwarz    | ~2100 (extrap)      |
+| Chebyshev ρ = 0.95              |  274                |
+| Chebyshev ρ = 0.97              |  197                |
+| **Chebyshev ρ = 0.98**          | **137**             |
+| Chebyshev ρ = 0.985             |  155                |
+| Chebyshev ρ = 0.99              |  189                |
+| Chebyshev ρ = 0.995             |  271                |
+
+**~15× outer-iter reduction** at the optimal ρ. Plain Schwarz
+contracts at 0.998/iter (measured), so its asymptote is ~2100 iters
+to 1e-9; Chebyshev with ρ=0.98 contracts at ~0.85/iter. The
+optimum sits slightly *below* the true contraction rate, which
+makes Chebyshev robust to spectral-radius mis-estimation.
+
+The 30-line `chebyshev_accel::accel` wrapper is the smallest
+evolution from the working Schwarz path that gets a 15× speedup
+without changing the underlying meshlet decomposition. This is
+the "small surgical fix" Gall's law calls for, applied to the
+meshlet-Schwarz architecture.
+
 ## How the robust path works
 
 `src/curvenet/robust_laplacian.h` mirrors
