@@ -57,19 +57,38 @@ the math as `def`s and `native_decide`s concrete property checks.
 | 1 | Cubic Bezier eval + derivative | 6 | green |
 | 2 | Closed-loop profile curve | 7 | green |
 | 3 | Bilinear Coons patch (quads) | 6 | green |
-| 4 | N-gon patch (N=3 + N=4; N≥5 TODO) | 6 | green |
+| 4 | N-gon patch (N=3, 4, ≥5 via MVC) | 8 | green |
 | 5 | Mesh binding & deformation | 5 | green |
-| 6 | `CurveNetDeformer3D` Godot node | — | full pipeline live (`scons` clean) |
+| 6 | `CurveNetDeformer3D` Godot node | — | full pipeline live + cached + GDScript API |
 | 7 | Tris-to-quads via LEMON matching | 5 | green |
 | 8 | LEMON `-fno-exceptions` patch | — | green |
-| 9 | Lean4 proof companion | 17 instance theorems | green (`lake build` passes) |
-| — | Bilinear inverse (Gauss-Newton) | 6 | green |
+| 9 | Lean4 proof companion | 24 theorems | green (`lake build` passes) |
+| — | Bilinear inverse (Gauss-Newton) | 7 | green |
 | — | Mesh binding (`bind_polymesh`) | 4 | green |
+| — | Mean-value coords (Floater 2003) | 4 | green |
 | — | End-to-end pipeline integration | 3 | green |
 
-**RapidCheck:** 48 properties × 100 random cases = **4,800 checks passing**.
-**Lean4:** 17 `native_decide` corner-recovery theorems on Float-valued
-specifications. Generic-over-ℝ theorems deferred until Mathlib is wired in.
+**RapidCheck:** 55 properties × 100 random cases = **5,500 checks passing**.
+**Lean4:** 24 `native_decide` theorems (Bezier, Coons, NgonPatch tri-path,
+mean-value Lagrange + partition of unity). Generic-over-ℝ theorems require
+Mathlib (deferred).
+
+## GDScript API
+
+`CurveNetDeformer3D` extends `MeshInstance3D` and exposes:
+
+```gdscript
+var d := CurveNetDeformer3D.new()
+d.source_path = NodePath("../SourceMesh")
+d.profile_curves = [my_curve_3d]
+d.length_tiebreak = 0.1            # 0..1, weights longer dissolved edges higher
+d.deformation_active = true        # triggers apply_deformation()
+
+d.apply_deformation()              # rest-pose pipeline cached after first call
+d.get_face_count()                 # post tri->quad fusion
+d.get_face_vertex_count(i)         # 3 (triangle) or 4 (quad)
+d.evaluate_face(i, s, t)           # Vector3 patch evaluation at (s, t) ∈ [0,1]²
+```
 
 ## Acknowledgements
 

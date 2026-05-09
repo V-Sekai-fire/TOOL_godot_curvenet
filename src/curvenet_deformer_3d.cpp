@@ -68,6 +68,9 @@ void CurveNetDeformer3D::_bind_methods() {
 			"set_deformation_active", "is_deformation_active");
 
 	ClassDB::bind_method(D_METHOD("apply_deformation"), &CurveNetDeformer3D::apply_deformation);
+	ClassDB::bind_method(D_METHOD("get_face_count"), &CurveNetDeformer3D::get_face_count);
+	ClassDB::bind_method(D_METHOD("get_face_vertex_count", "face_index"), &CurveNetDeformer3D::get_face_vertex_count);
+	ClassDB::bind_method(D_METHOD("evaluate_face", "face_index", "s", "t"), &CurveNetDeformer3D::evaluate_face);
 }
 
 void CurveNetDeformer3D::invalidate_cache() {
@@ -274,6 +277,60 @@ rest_cache_hit:
 			static_cast<int>(poly.vertices.size()), " verts, ",
 			static_cast<int>(poly.faces.size()), " faces (cache ",
 			(rest_cache.valid ? "valid" : "miss"), ")");
+}
+
+int CurveNetDeformer3D::get_face_count() const {
+	return rest_cache.valid ? static_cast<int>(rest_cache.poly.faces.size()) : 0;
+}
+
+int CurveNetDeformer3D::get_face_vertex_count(int face_index) const {
+	if (!rest_cache.valid || face_index < 0 ||
+			face_index >= static_cast<int>(rest_cache.poly.faces.size())) {
+		return 0;
+	}
+	return rest_cache.poly.faces[face_index].count;
+}
+
+Vector3 CurveNetDeformer3D::evaluate_face(int face_index, double s, double t) {
+	if (!rest_cache.valid) {
+		// Build the cache lazily so the first call works without a prior apply_deformation().
+		apply_deformation();
+	}
+	if (!rest_cache.valid || face_index < 0 ||
+			face_index >= static_cast<int>(rest_cache.poly.faces.size())) {
+		UtilityFunctions::printerr("CurveNetDeformer3D::evaluate_face: face_index out of range");
+		return Vector3{ 0.0f, 0.0f, 0.0f };
+	}
+	const curvenet::PolyFace &f = rest_cache.poly.faces[face_index];
+	if (f.count != 4) {
+		// Triangle path: fall back to bilinear-on-corners (degenerate Coons handled in NgonPatch).
+		// For now return the centroid as a stand-in.
+		curvenet::Vec3 acc{ 0.0, 0.0, 0.0 };
+		for (int i = 0; i < f.count; ++i) {
+			acc += rest_cache.poly.vertices[f.v[i]];
+		}
+		acc = acc * (1.0 / f.count);
+		return Vector3(acc.x, acc.y, acc.z);
+	}
+	auto straight = [](const curvenet::Vec3 &a, const curvenet::Vec3 &b) {
+		curvenet::BoundaryCurve bc;
+		bc.c0 = a;
+		bc.c3 = b;
+		bc.c1 = a + (b - a) * (1.0 / 3.0);
+		bc.c2 = a + (b - a) * (2.0 / 3.0);
+		return bc;
+	};
+	curvenet::CoonsPatch c;
+	const auto &v00 = rest_cache.poly.vertices[f.v[0]];
+	const auto &v10 = rest_cache.poly.vertices[f.v[1]];
+	const auto &v11 = rest_cache.poly.vertices[f.v[2]];
+	const auto &v01 = rest_cache.poly.vertices[f.v[3]];
+	c.u0 = straight(v00, v10);
+	c.v1 = straight(v10, v11);
+	c.u1 = straight(v01, v11);
+	c.v0 = straight(v00, v01);
+	curvenet::Vec3 r = c.evaluate(s, t);
+	return Vector3(r.x, r.y, r.z);
 }
 
 } // namespace godot

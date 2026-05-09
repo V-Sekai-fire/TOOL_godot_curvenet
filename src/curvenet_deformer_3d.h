@@ -69,6 +69,16 @@ public:
 	// it to this MeshInstance3D's mesh. Cheap on subsequent calls because
 	// the rest-pose tri->quad fusion + binding is cached.
 	void apply_deformation();
+
+	// Introspection for tooling / GDScript: how many faces after tri->quad fusion.
+	int get_face_count() const;
+	// Returns Mesh::PRIMITIVE_TRIANGLES face count (3 verts) or 4 for quads.
+	int get_face_vertex_count(int face_index) const;
+	// Evaluate the patch for face `face_index` at parameter (s, t) using the
+	// currently authored profile_curves as boundaries (or straight-line cubics
+	// if no curves are bound to that face's edges). Returns Vector3.ZERO and
+	// prints an error if the face index is out of range or the cache is empty.
+	Vector3 evaluate_face(int face_index, double s, double t);
 };
 
 } // namespace godot

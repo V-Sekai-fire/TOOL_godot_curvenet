@@ -102,5 +102,12 @@ int main() {
 		RC_ASSERT(std::fabs(r.t - t_in) < 1e-6);
 	});
 
+	ok &= rc::check("degenerate (all-coincident) quad reports infinite residual", [](Vec3 P) {
+		// Zero-area "quad" — all four corners at the same point.
+		auto r = solve_bilinear_inverse(Vec3{ 1.0, 2.0, 3.0 }, P, P, P, P);
+		RC_ASSERT(!r.converged);
+		RC_ASSERT(std::isinf(r.residual));
+	});
+
 	return ok ? 0 : 1;
 }

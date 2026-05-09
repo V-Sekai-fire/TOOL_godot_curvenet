@@ -5,6 +5,8 @@
 
 #include "vec3.h"
 
+#include <limits>
+
 namespace curvenet {
 
 // Result of inverting bilinear interpolation: (s,t) ∈ [0,1]^2 plus the
@@ -60,8 +62,13 @@ inline BilinearInverseResult solve_bilinear_inverse(
 		double c = dt.dot(dt);
 		double det = a * c - b * b;
 		if (det == 0.0) {
-			// Degenerate quad (collinear corners); abort.
-			break;
+			// Degenerate quad (collinear corners); abort with infinite residual
+			// so callers (e.g. bind_polymesh) skip this face when picking owner.
+			out.s = s;
+			out.t = t;
+			out.residual = std::numeric_limits<double>::infinity();
+			out.converged = false;
+			return out;
 		}
 		double inv_det = 1.0 / det;
 		double rs = ds.dot(r);
