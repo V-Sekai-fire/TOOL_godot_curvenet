@@ -6,5 +6,9 @@ config/name="curvenet_demo"
 run/main_scene="res://curvenet_demo.tscn"
 config/features=PackedStringArray("4.5")
 
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/VertexHandles/plugin.cfg")
+
 [rendering]
 renderer/rendering_method="gl_compatibility"
