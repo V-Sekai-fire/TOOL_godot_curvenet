@@ -120,6 +120,15 @@ inline std::vector<double> apply_jacobi(const std::vector<double> &d,
 	return y;
 }
 
+// Diagnostic struct returned by `cg_diag` so callers can inspect
+// iter count and final residual without re-deriving them. Used by
+// PERF_BASELINE benches to confirm whether slow solves are
+// iter-count-bound or per-iter-bound.
+struct CgStats {
+	std::size_t iters;
+	double      final_rr;   // ‖r‖² at exit (squared)
+};
+
 // Preconditioned conjugate gradient. SPD only. Returns x ≈ A⁻¹·b after
 // either `max_iter` iterations or once `‖r‖² < tol²`.
 inline std::vector<double> cg(const SparseMatrixCSR &A,
@@ -153,6 +162,45 @@ inline std::vector<double> cg(const SparseMatrixCSR &A,
 		p = saxpby(1.0, z, beta, p);
 		rz_old = rz_new;
 	}
+	return x;
+}
+
+// CG variant that reports iter count + final ‖r‖² alongside x. Same
+// algorithm as `cg`; we keep `cg` itself unchanged for ABI stability
+// with all the existing call sites.
+inline std::vector<double> cg_diag(const SparseMatrixCSR &A,
+                                      const std::vector<double> &b,
+                                      std::size_t max_iter,
+                                      double tol,
+                                      CgStats &stats) {
+	const std::size_t n = A.rows;
+	const std::vector<double> d = diagonal(A);
+	std::vector<double> x(n, 0.0);
+	std::vector<double> r = b;
+	std::vector<double> z = apply_jacobi(d, r);
+	std::vector<double> p = z;
+	double rz_old = dot(r, z);
+	const double tol_sq = tol * tol;
+	double last_rr = dot(r, r);
+	std::size_t iters_done = 0;
+	for (std::size_t iter = 0; iter < max_iter; ++iter) {
+		const std::vector<double> Ap = spmv(A, p);
+		const double pAp = dot(p, Ap);
+		if (pAp == 0.0) { iters_done = iter; break; }
+		const double alpha = rz_old / pAp;
+		axpy_inplace(alpha, p, x);
+		axpy_inplace(-alpha, Ap, r);
+		last_rr = dot(r, r);
+		iters_done = iter + 1;
+		if (last_rr < tol_sq) break;
+		z = apply_jacobi(d, r);
+		const double rz_new = dot(r, z);
+		const double beta = (rz_old == 0.0) ? 0.0 : (rz_new / rz_old);
+		p = saxpby(1.0, z, beta, p);
+		rz_old = rz_new;
+	}
+	stats.iters = iters_done;
+	stats.final_rr = last_rr;
 	return x;
 }
 

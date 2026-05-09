@@ -130,15 +130,18 @@ int main(int argc, char **argv) {
     const std::size_t cg_max_iter = std::max<std::size_t>(50, nv * 2);
     const double tol = 1e-8;
 
+    sp::CgStats stats;
     const double t_solve = now_ms();
     for (std::size_t col = 0; col < k; ++col) {
-        const std::vector<double> x = sp::cg(LhsM_csr, rhs, cg_max_iter, tol);
+        const std::vector<double> x =
+            sp::cg_diag(LhsM_csr, rhs, cg_max_iter, tol, stats);
         (void)x;
     }
     const double solve_ms = now_ms() - t_solve;
 
-    // Residual on the last-column solve, just so we know convergence.
-    const std::vector<double> x_last = sp::cg(LhsM_csr, rhs, cg_max_iter, tol);
+    // Diagnostic: time-per-iter on the last solve, and residual.
+    const std::vector<double> x_last =
+        sp::cg_diag(LhsM_csr, rhs, cg_max_iter, tol, stats);
     const std::vector<double> Ax = sp::spmv(LhsM_csr, x_last);
     double max_resid = 0.0;
     for (std::size_t i = 0; i < nv; ++i) {
@@ -146,8 +149,17 @@ int main(int argc, char **argv) {
         if (r > max_resid) max_resid = r;
     }
 
+    const double per_rhs_ms = solve_ms / static_cast<double>(k);
+    const double per_iter_ms = (stats.iters > 0)
+        ? per_rhs_ms / static_cast<double>(stats.iters) : 0.0;
     std::printf("solve (12 RHS cold-start CGs): %.2f ms  (~%.2f ms / RHS)\n",
-                  solve_ms, solve_ms / static_cast<double>(k));
+                  solve_ms, per_rhs_ms);
+    std::printf("  CG iters:   %zu / %zu  (cap = %zu)\n",
+                  stats.iters, cg_max_iter, cg_max_iter);
+    std::printf("  CG sqrt(rr): %.3e   tol = %.3e\n",
+                  std::sqrt(stats.final_rr), tol);
+    std::printf("  per-iter:   %.3f ms (%.0f µs)\n",
+                  per_iter_ms, per_iter_ms * 1000.0);
     std::printf("last RHS max_resid: %.3e\n", max_resid);
 
     std::printf("\n--- summary ---\n");
