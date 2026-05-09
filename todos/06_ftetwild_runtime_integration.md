@@ -31,15 +31,18 @@ Caveats:
 4. Hook into `CurveNetDeformer3D::apply_deformation` *before* cut-mesh
    construction (slice 3 of the Lean rewrite).
 
-## Alternatives if fTetWild is too heavy
+## Alternatives considered (rejected, kept for context)
 
-- **MeshFix** (https://github.com/MarcoAttene/MeshFix-V2.1): lighter, surface-only
-  repair. Trades robustness on pathological cases for fewer dependencies.
-- **libigl `is_edge_manifold` + bowtie removal**: cheap if input is *almost*
-  manifold (just needs T-junction snapping).
-- **Trust the input**: skip repair entirely; document that callers must
-  supply manifold meshes. Acceptable for the demo (Godot's primitive meshes
-  are manifold) but not for runtime asset imports.
+The fTetWild choice is **locked in** (see project memory entry
+`manifold_prepass_ftetwild`). The alternatives below were considered but
+not selected — listed here only so future readers don't re-relitigate.
+
+- **MeshFix** (https://github.com/MarcoAttene/MeshFix-V2.1): lighter,
+  surface-only repair. Less robust on pathological cases.
+- **libigl `is_edge_manifold` + bowtie removal**: cheap if input is
+  *almost* manifold. Doesn't handle self-intersecting input.
+- **Trust the input**: rejected — fine for the demo (Godot primitives are
+  manifold) but breaks for arbitrary user-imported assets.
 
 ## Acceptance
 
