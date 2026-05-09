@@ -4,6 +4,7 @@
 #define CURVENET_NGON_PATCH_H
 
 #include "coons_patch.h"
+#include "mean_value.h"
 #include "vec3.h"
 
 #include <cmath>
@@ -55,9 +56,19 @@ struct NgonPatch {
 			c.u1 = BoundaryCurve{ P2, P2, P2, P2 };
 			return c.evaluate(s, t);
 		}
-		// TODO(N>=5): Hormann-Floater mean-value coordinates over a regular N-gon domain.
-		const double nan_val = std::nan("");
-		return Vec3{ nan_val, nan_val, nan_val };
+		// N >= 5: blend N boundary vertex positions by mean-value coords on a
+		// regular N-gon domain. (s, t) is the 2D query point inside the unit-
+		// radius regular N-gon; vertex i of the patch is the start of side i.
+		// Gives partition-of-unity translation invariance and exact recovery
+		// at each domain vertex. Boundary recovery along sides is approximate;
+		// extending to side-MVC for exact transfinite is future work.
+		std::vector<Vec2> domain = regular_ngon(sides);
+		std::vector<double> w = mean_value_weights(domain, Vec2{ s, t });
+		Vec3 acc{ 0.0, 0.0, 0.0 };
+		for (int i = 0; i < sides; ++i) {
+			acc += boundaries[i].c0 * w[i];
+		}
+		return acc;
 	}
 };
 

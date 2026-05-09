@@ -131,5 +131,53 @@ int main() {
 		RC_ASSERT(cnt::approx_eq(a, b, 1e-9));
 	});
 
+	// N >= 5 path via mean-value coordinates on a regular N-gon domain.
+	auto gen_pentagon_patch = [&]() {
+		return rc::gen::map(
+				rc::gen::tuple(gen_vec(), gen_vec(), gen_vec(), gen_vec(), gen_vec()),
+				[](std::tuple<Vec3, Vec3, Vec3, Vec3, Vec3> t) {
+					Vec3 P[5] = { std::get<0>(t), std::get<1>(t), std::get<2>(t), std::get<3>(t), std::get<4>(t) };
+					NgonPatch ng;
+					for (int i = 0; i < 5; ++i) {
+						BoundaryCurve b;
+						b.c0 = P[i];
+						b.c3 = P[(i + 1) % 5];
+						b.c1 = P[i] + (P[(i + 1) % 5] - P[i]) * (1.0 / 3.0);
+						b.c2 = P[i] + (P[(i + 1) % 5] - P[i]) * (2.0 / 3.0);
+						ng.boundaries.push_back(b);
+					}
+					return ng;
+				});
+	};
+
+	ok &= rc::check("5-sided NgonPatch evaluates a vertex of the domain to that boundary's c0", [&] {
+		NgonPatch ng = *gen_pentagon_patch();
+		// At domain vertex i (on the unit circle), MVC weights are 1.0 at i, 0 elsewhere.
+		const double two_pi = 6.283185307179586;
+		int i = *rc::gen::inRange<int>(0, 5);
+		double s = std::cos(two_pi * i / 5.0);
+		double t = std::sin(two_pi * i / 5.0);
+		Vec3 r = ng.evaluate(s, t);
+		RC_ASSERT(cnt::approx_eq(r, ng.boundaries[i].c0, 1e-9));
+	});
+
+	ok &= rc::check("5-sided NgonPatch translation invariance", [&](Vec3 d) {
+		NgonPatch ng = *gen_pentagon_patch();
+		NgonPatch ng2 = ng;
+		for (auto &b : ng2.boundaries) {
+			b.c0 = b.c0 + d;
+			b.c1 = b.c1 + d;
+			b.c2 = b.c2 + d;
+			b.c3 = b.c3 + d;
+		}
+		double s = *rc::gen::map(rc::gen::inRange<int>(-50, 51),
+				[](int v) { return static_cast<double>(v) * 0.01; });
+		double t = *rc::gen::map(rc::gen::inRange<int>(-50, 51),
+				[](int v) { return static_cast<double>(v) * 0.01; });
+		Vec3 a = ng.evaluate(s, t) + d;
+		Vec3 b = ng2.evaluate(s, t);
+		RC_ASSERT(cnt::approx_eq(a, b, 1e-9));
+	});
+
 	return ok ? 0 : 1;
 }
