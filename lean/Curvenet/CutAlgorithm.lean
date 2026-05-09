@@ -25,6 +25,7 @@ since cracks intentionally break `twinsAreOpposite`.
 -/
 
 import Curvenet.Halfedge
+import Curvenet.CutMesh
 
 namespace Curvenet
 namespace CutAlgorithm
@@ -156,6 +157,37 @@ def splitFace (m : HalfedgeMesh) (a b : Nat) : HalfedgeMesh := Id.run do
          , faceCount   := nf + 1
          , halfedges   := newHalfedges }
 
+/- CutMesh-level wrappers extend per-vertex kind and per-halfedge
+   segment annotations alongside the underlying halfedge surgery.
+   They live in the same `CutAlgorithm` namespace to avoid colliding
+   with the `CutMesh` structure name. -/
+
+/-- Wraps `subdivideEdge` while extending the cut-mesh annotations: the
+   new vertex (index = old vertexCount) gets the kind `newVertexKind`
+   (typically `sample` if a curvenet sample landed there or
+   `edgeIntersection` for a generic chain crossing). The two new
+   halfedges inherit the existing edge's segment annotation (`none` if
+   it wasn't already on a curvenet segment). -/
+def subdivideEdgeCM (cm : CutMesh) (h : Nat) (newVertexKind : CutVertexKind) : CutMesh :=
+  let newBase := subdivideEdge cm.base h
+  let newKinds := cm.vertexKind.push newVertexKind
+  let segOfH := cm.segmentOfHalfedge[h]!
+  let newSegs := cm.segmentOfHalfedge.push segOfH |>.push segOfH
+  { base              := newBase
+  , vertexKind        := newKinds
+  , segmentOfHalfedge := newSegs }
+
+/-- Wraps `splitFace`, tagging both new halfedges with the supplied
+   curvenet segment id. Vertex kinds are unchanged; if the caller wants
+   the connecting endpoints promoted to samples, that's a separate
+   step. -/
+def splitFaceCM (cm : CutMesh) (a b : Nat) (segId : Nat) : CutMesh :=
+  let newBase := splitFace cm.base a b
+  let newSegs := cm.segmentOfHalfedge.push (some segId) |>.push (some segId)
+  { base              := newBase
+  , vertexKind        := cm.vertexKind
+  , segmentOfHalfedge := newSegs }
+
 end CutAlgorithm
 
 /- ============================================================ -/
@@ -267,6 +299,47 @@ example : quadSubdivThenSplit.vertexCount = 5 := by native_decide
 example : quadSubdivThenSplit.heCount     = 12 := by native_decide
 example : quadSubdivThenSplit.faceCount   = 2 := by native_decide
 example : quadSubdivThenSplit.manifold?   = true := by native_decide
+
+/- ============================================================ -/
+/- CutMesh wrappers: surgery + annotation extension preserves   -/
+/- partition-of-unity and VtCIsZero.                            -/
+/- ============================================================ -/
+
+private def noSampleCol : Nat → Nat → Bool → Nat := fun _ _ _ => 0
+
+/-- Subdivide the uncut quad's edge 0 with the new vertex tagged as a
+   curvenet sample. The CutMesh now has 5 vertices (one promoted) and
+   10 halfedges. -/
+def quadSubdivCM : CutMesh :=
+  CutAlgorithm.subdivideEdgeCM CutExamples.uncutQuad 0
+    (CutVertexKind.sample 0 0 false)
+
+example : quadSubdivCM.vertexCount = 5 := by native_decide
+example : quadSubdivCM.heCount     = 10 := by native_decide
+
+/-- Partition of unity holds across the subdivided cut-mesh: every
+   halfedge contributes to exactly one of V or C. -/
+example : quadSubdivCM.partitionOfUnity noSampleCol = true := by native_decide
+
+/-- VtC = 0 also still holds. -/
+example : quadSubdivCM.VtCIsZero noSampleCol = true := by native_decide
+
+/-- Splitting the uncut quad's diagonal as a CutMesh keeps the
+   annotations consistent: the two new halfedges are tagged with
+   segment 7, vertex kinds unchanged, partition of unity intact. -/
+def quadSplitCM : CutMesh :=
+  CutAlgorithm.splitFaceCM CutExamples.uncutQuad 0 2 7
+
+example : quadSplitCM.heCount = 10 := by native_decide
+
+/-- Both new halfedges have segmentOfHalfedge = some 7. -/
+example :
+    let cm := quadSplitCM
+    (cm.segmentOfHalfedge[8]! == some 7 ∧
+     cm.segmentOfHalfedge[9]! == some 7) := by native_decide
+
+example : quadSplitCM.partitionOfUnity noSampleCol = true := by native_decide
+example : quadSplitCM.VtCIsZero        noSampleCol = true := by native_decide
 
 end CutAlgorithmExamples
 
