@@ -233,17 +233,38 @@ different aggregate topology (HEM aggregates are always connected,
 principal-axis are often disconnected). This rules out the
 loop-8 hypothesis.
 
-Updated hypothesis: the 81k system is ill-conditioned in the
-constant null-space mode. The mollified Laplacian
-`V^T·L_h·V` has a 1D constant kernel; without a Dirichlet anchor
-the consistency condition `b ⊥ ker` is satisfied by construction
-(b = A·y_seed) but Krylov drift accumulates kernel-mode error at
-scale. The relative residual at the plateau is ~6e-3 on 81k vs
-~2e-9 on 5k — exactly what kernel-mode pollution looks like.
+Loop-100/2 ruled out the kernel hypothesis. `diag_70k_cg_baseline`
+(plain unpreconditioned CG on the 81k cut-mesh Laplacian) reports:
 
-Next loop: pin one DOF as Dirichlet (or project out the constant
-mode at every V-cycle correction) and re-run. The multilevel +
-HEM infrastructure stays as-is.
+  max |row_sum| = 1.16e-10        (constant kernel exact)
+  diag range    = [8.2e-2, 1.1e+6]  (7 orders of magnitude!)
+  b mean        = -1.3e-13           (b in range(A), consistent)
+  plain CG: 200,000 iters → ‖r‖² = 3.6e-10  (133 s)
+
+Implication: the matrix is fine. The constant kernel is essentially
+exact and `b` is essentially in range, so the system is consistent.
+Plain CG converges to ‖r‖ ≈ 1.9e-5 in 200k iters — that is, the
+preconditioned multilevel V-cycle (which stalls at L_inf residual
+3.7) is **worse than no preconditioner**.
+
+The smoking gun is the diagonal spread: 7 orders of magnitude.
+Galerkin coarsening inherits this range. The intermediate-level
+Jacobi smoother (`omega · D^{-1} · r`) becomes useless when D has
+that much spread — small-diag rows are over-relaxed, large-diag
+rows are under-relaxed. Plain CG's diagonal-Jacobi preconditioner
+is implicit and at least homogenizes the scaling per iter; the
+V-cycle's discrete Jacobi sweeps don't.
+
+Loop-100/2 also added kernel projection (`zero_mean_in_place`) on
+the V-cycle correction. Lean spec + 6 native_decide proofs +
+5 RC props, mirrored to `src/curvenet/kernel_projection.h`. Did
+not break 5k convergence (168 iters preserved) and was harmless
+on 81k (still stalls at 3.7). Kept in the tree because it's
+load-bearing infrastructure for any future kernel-aware variant.
+
+Next loop: replace Jacobi smoother with one that handles wide
+diagonal ranges — symmetric Gauss-Seidel, or symmetric diagonal
+scaling D^{-1/2} A D^{-1/2} on every level before iterating.
 
 ## Next steps
 

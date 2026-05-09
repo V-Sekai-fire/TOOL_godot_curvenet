@@ -25,7 +25,7 @@ RC_SRC := $(shell find $(RC)/src -name "*.cpp")
 RC_OBJ := $(RC_SRC:.cpp=.o)
 LIBRC := librapidcheck.a
 
-TESTS := test_halfedge test_polygon_laplacian test_dense_linalg test_scaled_frames test_cut_algorithm test_deform_solve test_halfedge_builder test_curvenet_builder test_surface_projection test_chebyshev_accel test_two_level_schwarz test_multi_level_schwarz test_heavy_edge_matching
+TESTS := test_halfedge test_polygon_laplacian test_dense_linalg test_scaled_frames test_cut_algorithm test_deform_solve test_halfedge_builder test_curvenet_builder test_surface_projection test_chebyshev_accel test_two_level_schwarz test_multi_level_schwarz test_heavy_edge_matching test_kernel_projection
 TEST_BINS := $(addprefix bin/,$(TESTS))
 
 BENCH_CXXFLAGS := -std=c++14 -O3 -DNDEBUG -Wall -Wno-missing-braces \
@@ -286,6 +286,12 @@ bin/diag_multi_level_schwarz_70k: diag_multi_level_schwarz_70k.cpp mire_body_70k
 
 diag_multi_level_schwarz_70k: bin/diag_multi_level_schwarz_70k
 	@bin/diag_multi_level_schwarz_70k
+
+bin/diag_70k_cg_baseline: diag_70k_cg_baseline.cpp mire_body_70k_data.h | bin
+	$(CXX) $(BENCH_CXXFLAGS) -o $@ $<
+
+diag_70k_cg_baseline: bin/diag_70k_cg_baseline
+	@bin/diag_70k_cg_baseline
 
 clean:
 	rm -rf bin $(LIBRC)

@@ -33,3 +33,4 @@ import Curvenet.ChebyshevAccel
 import Curvenet.TwoLevelSchwarz
 import Curvenet.MultiLevelSchwarz
 import Curvenet.HeavyEdgeMatching
+import Curvenet.KernelProjection

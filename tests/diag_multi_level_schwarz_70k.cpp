@@ -18,6 +18,7 @@
 #include "curvenet/cut_mesh_laplacian.h"
 #include "curvenet/halfedge_builder.h"
 #include "curvenet/heavy_edge_matching.h"
+#include "curvenet/kernel_projection.h"
 #include "curvenet/multi_level_schwarz.h"
 #include "curvenet/sparse_linalg.h"
 #include "curvenet/two_level_schwarz.h"
@@ -40,6 +41,7 @@ using curvenet::Vec3;
 namespace cm  = curvenet::cut_mesh;
 namespace cml = curvenet::cut_mesh_laplacian;
 namespace hem = curvenet::heavy_edge_matching;
+namespace kp  = curvenet::kernel_projection;
 namespace mls = curvenet::multi_level_schwarz;
 namespace sp  = curvenet::sparse;
 namespace tls = curvenet::two_level_schwarz;
@@ -408,7 +410,14 @@ int main(int argc, char **argv) {
         std::vector<double> r(nv);
         for (std::size_t i = 0; i < nv; ++i) r[i] = b[i] - Ax[i];
 
-        const std::vector<double> y = v_cycle(ml, r);
+        std::vector<double> y = v_cycle(ml, r);
+        // Project out the constant kernel mode from the V-cycle
+        // correction before applying it. This is the load-bearing
+        // fix for the 81k stall (see PERF_BASELINE.md, loop 100/2):
+        // each prolong R^T y_c is piecewise constant per cluster
+        // and rarely zero-mean, so without this projection the fine
+        // solution drifts in the constant null-space mode of A.
+        kp::zero_mean_in_place(y);
         for (std::size_t i = 0; i < nv; ++i) x[i] += y[i];
 
         const std::vector<double> d2 = schwarz_sweep_delta(ctx, x);
