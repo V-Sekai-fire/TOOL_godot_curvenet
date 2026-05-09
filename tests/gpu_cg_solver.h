@@ -61,14 +61,6 @@ public:
     void shutdown();
 
 private:
-    // Dispatch helpers — one per kernel. Each takes the descriptor set
-    // already bound to the right buffers and the dispatch group count.
-    void dispatch_spmv  (VkDescriptorSet ds);
-    void dispatch_dot   (VkDescriptorSet ds);
-    void dispatch_axpy  (VkDescriptorSet ds);
-    void dispatch_jacobi(VkDescriptorSet ds);
-    void dispatch_saxpby(VkDescriptorSet ds);
-
     // Read back the df32 (hi, lo) pair from `dot_pair` and fold to fp64.
     double read_dot_scalar() const;
 
@@ -120,6 +112,18 @@ private:
     VkDescriptorSet ds_jacobi_r  = VK_NULL_HANDLE; // per-iter z ← M⁻¹·r
     VkDescriptorSet ds_saxpby    = VK_NULL_HANDLE;
 
+    // Recycled command-buffer/fence pairs. Per CG iter we use four:
+    // batch 1 (spmv + dot_pAp), batch 2 (axpy_x + axpy_r + dot_rr),
+    // batch 3 (jacobi + dot_rz), batch 4 (saxpby). Pre-allocating
+    // them in init() avoids the ~150 us per-CB churn on MoltenVK.
+    CommandBatch batch_spmv_pAp;
+    CommandBatch batch_axpy_rr;
+    CommandBatch batch_jacobi_rz;
+    CommandBatch batch_saxpby;
+    CommandBatch batch_init_warm;
+    CommandBatch batch_dot_only;  // initial rz_old dispatch + the
+                                    // jacobi(b)→z dispatch for cold start
+
     std::uint32_t n_rows = 0;
 };
 
@@ -149,6 +153,13 @@ inline void GpuCgSolver::init(VulkanCompute &vk_in,
     dpci.poolSizeCount = 2;
     dpci.pPoolSizes    = sizes;
     VK_OR_DIE(vkCreateDescriptorPool(vk->device, &dpci, nullptr, &pool));
+
+    batch_spmv_pAp .init(*vk);
+    batch_axpy_rr  .init(*vk);
+    batch_jacobi_rz.init(*vk);
+    batch_saxpby   .init(*vk);
+    batch_init_warm.init(*vk);
+    batch_dot_only .init(*vk);
 }
 
 inline void GpuCgSolver::shutdown() {
@@ -158,6 +169,12 @@ inline void GpuCgSolver::shutdown() {
     kill(b_buf); kill(x_buf); kill(r_buf); kill(z_buf);
     kill(p_buf); kill(Ap_buf); kill(dot_pair);
     kill(u_spmv); kill(u_n); kill(u_axpy_x); kill(u_axpy_r); kill(u_saxpby);
+    batch_spmv_pAp .shutdown();
+    batch_axpy_rr  .shutdown();
+    batch_jacobi_rz.shutdown();
+    batch_saxpby   .shutdown();
+    batch_init_warm.shutdown();
+    batch_dot_only .shutdown();
     if (pool) vkDestroyDescriptorPool(vk->device, pool, nullptr);
     pool = VK_NULL_HANDLE;
     k_spmv.shutdown(vk->device);
@@ -271,23 +288,6 @@ inline void GpuCgSolver::write_saxpby_uniform(Buffer &u, std::uint32_t n,
     std::memcpy(p + 8, &beta,  sizeof(float));
 }
 
-inline void GpuCgSolver::dispatch_spmv  (VkDescriptorSet ds) {
-    run_compute_once(*vk, k_spmv  .pipeline, k_spmv  .layout, ds, (n_rows + 63) / 64);
-}
-inline void GpuCgSolver::dispatch_dot   (VkDescriptorSet ds) {
-    // Single workgroup grid-strided over the input.
-    run_compute_once(*vk, k_dot   .pipeline, k_dot   .layout, ds, 1);
-}
-inline void GpuCgSolver::dispatch_axpy  (VkDescriptorSet ds) {
-    run_compute_once(*vk, k_axpy  .pipeline, k_axpy  .layout, ds, (n_rows + 63) / 64);
-}
-inline void GpuCgSolver::dispatch_jacobi(VkDescriptorSet ds) {
-    run_compute_once(*vk, k_jacobi.pipeline, k_jacobi.layout, ds, (n_rows + 63) / 64);
-}
-inline void GpuCgSolver::dispatch_saxpby(VkDescriptorSet ds) {
-    run_compute_once(*vk, k_saxpby.pipeline, k_saxpby.layout, ds, (n_rows + 63) / 64);
-}
-
 inline double GpuCgSolver::read_dot_scalar() const {
     float pair[2];
     std::memcpy(pair, dot_pair.mapped, 2 * sizeof(float));
@@ -314,65 +314,56 @@ inline std::vector<double> GpuCgSolver::solve_with_guess(
     std::memcpy(r_buf.mapped, b_buf.mapped, n_rows * sizeof(float));
     write_axpy_uniform(u_axpy_r, n_rows, -1.0f);
     {
-        CommandBatch cb;
-        cb.begin(*vk);
-        cb.dispatch(k_spmv  .pipeline, k_spmv  .layout, ds_spmv,     (n_rows + 63) / 64);
-        cb.barrier();
-        cb.dispatch(k_axpy  .pipeline, k_axpy  .layout, ds_axpy_r,   (n_rows + 63) / 64);
-        cb.barrier();
-        cb.dispatch(k_jacobi.pipeline, k_jacobi.layout, ds_jacobi_r, (n_rows + 63) / 64);
-        cb.end_and_submit_wait();
+        const std::uint32_t gx0 = (n_rows + 63) / 64;
+        batch_init_warm.begin();
+        batch_init_warm.dispatch(k_spmv  .pipeline, k_spmv  .layout, ds_spmv,     gx0);
+        batch_init_warm.barrier();
+        batch_init_warm.dispatch(k_axpy  .pipeline, k_axpy  .layout, ds_axpy_r,   gx0);
+        batch_init_warm.barrier();
+        batch_init_warm.dispatch(k_jacobi.pipeline, k_jacobi.layout, ds_jacobi_r, gx0);
+        batch_init_warm.end_and_submit_wait();
     }
     std::memcpy(p_buf.mapped, z_buf.mapped, n_rows * sizeof(float));
 
-    dispatch_dot(ds_dot_rz);
+    // Initial dot product r·z for rz_old. Persists through the iter loop.
+    batch_dot_only.begin();
+    batch_dot_only.dispatch(k_dot.pipeline, k_dot.layout, ds_dot_rz, 1);
+    batch_dot_only.end_and_submit_wait();
     double rz_old = read_dot_scalar();
 
     const double tol_sq    = tol * tol;
     const std::uint32_t gx = (n_rows + 63) / 64;
     std::size_t iter = 0;
     for (; iter < max_iter; ++iter) {
-        {
-            CommandBatch cb;
-            cb.begin(*vk);
-            cb.dispatch(k_spmv.pipeline, k_spmv.layout, ds_spmv,    gx);
-            cb.barrier();
-            cb.dispatch(k_dot .pipeline, k_dot .layout, ds_dot_pAp, 1);
-            cb.end_and_submit_wait();
-        }
+        batch_spmv_pAp.begin();
+        batch_spmv_pAp.dispatch(k_spmv.pipeline, k_spmv.layout, ds_spmv, gx);
+        batch_spmv_pAp.barrier();
+        batch_spmv_pAp.dispatch(k_dot.pipeline, k_dot.layout, ds_dot_pAp, 1);
+        batch_spmv_pAp.end_and_submit_wait();
         const double pAp = read_dot_scalar();
         if (pAp == 0.0) break;
         const double alpha = rz_old / pAp;
         write_axpy_uniform(u_axpy_x, n_rows, static_cast<float>(alpha));
         write_axpy_uniform(u_axpy_r, n_rows, static_cast<float>(-alpha));
-        {
-            CommandBatch cb;
-            cb.begin(*vk);
-            cb.dispatch(k_axpy.pipeline, k_axpy.layout, ds_axpy_x, gx);
-            cb.dispatch(k_axpy.pipeline, k_axpy.layout, ds_axpy_r, gx);
-            cb.barrier();
-            cb.dispatch(k_dot .pipeline, k_dot .layout, ds_dot_rr, 1);
-            cb.end_and_submit_wait();
-        }
+        batch_axpy_rr.begin();
+        batch_axpy_rr.dispatch(k_axpy.pipeline, k_axpy.layout, ds_axpy_x, gx);
+        batch_axpy_rr.dispatch(k_axpy.pipeline, k_axpy.layout, ds_axpy_r, gx);
+        batch_axpy_rr.barrier();
+        batch_axpy_rr.dispatch(k_dot.pipeline, k_dot.layout, ds_dot_rr, 1);
+        batch_axpy_rr.end_and_submit_wait();
         const double rr = read_dot_scalar();
         if (rr < tol_sq) { ++iter; break; }
-        {
-            CommandBatch cb;
-            cb.begin(*vk);
-            cb.dispatch(k_jacobi.pipeline, k_jacobi.layout, ds_jacobi_r, gx);
-            cb.barrier();
-            cb.dispatch(k_dot   .pipeline, k_dot   .layout, ds_dot_rz,    1);
-            cb.end_and_submit_wait();
-        }
+        batch_jacobi_rz.begin();
+        batch_jacobi_rz.dispatch(k_jacobi.pipeline, k_jacobi.layout, ds_jacobi_r, gx);
+        batch_jacobi_rz.barrier();
+        batch_jacobi_rz.dispatch(k_dot.pipeline, k_dot.layout, ds_dot_rz, 1);
+        batch_jacobi_rz.end_and_submit_wait();
         const double rz_new = read_dot_scalar();
         const double beta   = (rz_old == 0.0) ? 0.0 : (rz_new / rz_old);
         write_saxpby_uniform(u_saxpby, n_rows, 1.0f, static_cast<float>(beta));
-        {
-            CommandBatch cb;
-            cb.begin(*vk);
-            cb.dispatch(k_saxpby.pipeline, k_saxpby.layout, ds_saxpby, gx);
-            cb.end_and_submit_wait();
-        }
+        batch_saxpby.begin();
+        batch_saxpby.dispatch(k_saxpby.pipeline, k_saxpby.layout, ds_saxpby, gx);
+        batch_saxpby.end_and_submit_wait();
         rz_old = rz_new;
     }
     if (iters_used) *iters_used = iter;
@@ -400,32 +391,29 @@ inline std::vector<double> GpuCgSolver::solve(const std::vector<double> &b,
     // r ← b   (since x₀ = 0).
     std::memcpy(r_buf.mapped, b_buf.mapped, n_rows * sizeof(float));
 
-    // z ← M⁻¹ · b   (uses ds_jacobi_b which reads b → writes z).
-    dispatch_jacobi(ds_jacobi_b);
+    // Initial setup batch: z = M⁻¹·b ; rz_old = r·z.
+    {
+        const std::uint32_t gx0 = (n_rows + 63) / 64;
+        batch_init_warm.begin();
+        batch_init_warm.dispatch(k_jacobi.pipeline, k_jacobi.layout, ds_jacobi_b, gx0);
+        batch_init_warm.barrier();
+        batch_init_warm.dispatch(k_dot   .pipeline, k_dot   .layout, ds_dot_rz,    1);
+        batch_init_warm.end_and_submit_wait();
+    }
 
     // p ← z   (one host-side memcpy is cheaper than a saxpby dispatch).
     std::memcpy(p_buf.mapped, z_buf.mapped, n_rows * sizeof(float));
-
-    // ρ_old = r·z.
-    dispatch_dot(ds_dot_rz);
     double rz_old = read_dot_scalar();
 
     const double tol_sq    = tol * tol;
     const std::uint32_t gx = (n_rows + 63) / 64;
     std::size_t iter = 0;
     for (; iter < max_iter; ++iter) {
-        // ----------------------------------------------------------------
-        // Batch 1: (Ap = A·p) + (pAp = p·Ap) — one CB, one wait, one
-        // readback to compute α.
-        // ----------------------------------------------------------------
-        {
-            CommandBatch cb;
-            cb.begin(*vk);
-            cb.dispatch(k_spmv.pipeline, k_spmv.layout, ds_spmv,    gx);
-            cb.barrier();
-            cb.dispatch(k_dot .pipeline, k_dot .layout, ds_dot_pAp, 1);
-            cb.end_and_submit_wait();
-        }
+        batch_spmv_pAp.begin();
+        batch_spmv_pAp.dispatch(k_spmv.pipeline, k_spmv.layout, ds_spmv, gx);
+        batch_spmv_pAp.barrier();
+        batch_spmv_pAp.dispatch(k_dot.pipeline, k_dot.layout, ds_dot_pAp, 1);
+        batch_spmv_pAp.end_and_submit_wait();
         const double pAp = read_dot_scalar();
         if (pAp == 0.0) break;
 
@@ -433,56 +421,30 @@ inline std::vector<double> GpuCgSolver::solve(const std::vector<double> &b,
         write_axpy_uniform(u_axpy_x, n_rows, static_cast<float>(alpha));
         write_axpy_uniform(u_axpy_r, n_rows, static_cast<float>(-alpha));
 
-        // ----------------------------------------------------------------
-        // Batch 2: x += α·p ; r -= α·Ap ; rr = r·r — one CB, one wait,
-        // one readback for the convergence check.
-        // ----------------------------------------------------------------
-        {
-            CommandBatch cb;
-            cb.begin(*vk);
-            cb.dispatch(k_axpy.pipeline, k_axpy.layout, ds_axpy_x, gx);
-            // x and r are independent buffers, but both write the
-            // pair output of a later dot, so a memory barrier here is
-            // simpler than tracking the per-buffer dep graph.
-            cb.dispatch(k_axpy.pipeline, k_axpy.layout, ds_axpy_r, gx);
-            cb.barrier();
-            cb.dispatch(k_dot .pipeline, k_dot .layout, ds_dot_rr,  1);
-            cb.end_and_submit_wait();
-        }
+        batch_axpy_rr.begin();
+        batch_axpy_rr.dispatch(k_axpy.pipeline, k_axpy.layout, ds_axpy_x, gx);
+        batch_axpy_rr.dispatch(k_axpy.pipeline, k_axpy.layout, ds_axpy_r, gx);
+        batch_axpy_rr.barrier();
+        batch_axpy_rr.dispatch(k_dot.pipeline, k_dot.layout, ds_dot_rr, 1);
+        batch_axpy_rr.end_and_submit_wait();
         const double rr = read_dot_scalar();
         if (rr < tol_sq) {
             ++iter;
             break;
         }
 
-        // ----------------------------------------------------------------
-        // Batch 3: z = M⁻¹·r ; rz_new = r·z — one CB, one wait, one
-        // readback for β.
-        // ----------------------------------------------------------------
-        {
-            CommandBatch cb;
-            cb.begin(*vk);
-            cb.dispatch(k_jacobi.pipeline, k_jacobi.layout, ds_jacobi_r, gx);
-            cb.barrier();
-            cb.dispatch(k_dot   .pipeline, k_dot   .layout, ds_dot_rz,    1);
-            cb.end_and_submit_wait();
-        }
+        batch_jacobi_rz.begin();
+        batch_jacobi_rz.dispatch(k_jacobi.pipeline, k_jacobi.layout, ds_jacobi_r, gx);
+        batch_jacobi_rz.barrier();
+        batch_jacobi_rz.dispatch(k_dot.pipeline, k_dot.layout, ds_dot_rz, 1);
+        batch_jacobi_rz.end_and_submit_wait();
         const double rz_new = read_dot_scalar();
         const double beta   = (rz_old == 0.0) ? 0.0 : (rz_new / rz_old);
 
-        // ----------------------------------------------------------------
-        // Batch 4 (alone): p ← 1·z + β·p. Could fold into the next
-        // iter's batch 1 but the prologue read of `p` would need a
-        // barrier on `p` against the saxpby's write — easier to keep
-        // separate for now.
-        // ----------------------------------------------------------------
         write_saxpby_uniform(u_saxpby, n_rows, 1.0f, static_cast<float>(beta));
-        {
-            CommandBatch cb;
-            cb.begin(*vk);
-            cb.dispatch(k_saxpby.pipeline, k_saxpby.layout, ds_saxpby, gx);
-            cb.end_and_submit_wait();
-        }
+        batch_saxpby.begin();
+        batch_saxpby.dispatch(k_saxpby.pipeline, k_saxpby.layout, ds_saxpby, gx);
+        batch_saxpby.end_and_submit_wait();
 
         rz_old = rz_new;
     }

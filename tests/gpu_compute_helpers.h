@@ -321,13 +321,15 @@ inline VkDescriptorSet alloc_and_bind(VkDevice device,
 
 // Record N compute dispatches into a single command buffer with
 // SHADER_WRITE -> SHADER_READ pipeline barriers between them, then
-// submit once. Cuts MoltenVK's per-submit overhead by N×.
+// submit once. The CB and fence are allocated once in `init()` and
+// recycled across calls — important on MoltenVK where each
+// vkAllocateCommandBuffers + vkCreateFence pair adds ~150 us.
 struct CommandBatch {
-    VkCommandBuffer cmd  = VK_NULL_HANDLE;
+    VkCommandBuffer cmd   = VK_NULL_HANDLE;
     VkFence         fence = VK_NULL_HANDLE;
     const VulkanCompute *vk = nullptr;
 
-    void begin(const VulkanCompute &vk_in) {
+    void init(const VulkanCompute &vk_in) {
         vk = &vk_in;
         VkCommandBufferAllocateInfo cbi{};
         cbi.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -335,14 +337,31 @@ struct CommandBatch {
         cbi.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         cbi.commandBufferCount = 1;
         VK_OR_DIE(vkAllocateCommandBuffers(vk->device, &cbi, &cmd));
-        VkCommandBufferBeginInfo begin{};
-        begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        VK_OR_DIE(vkBeginCommandBuffer(cmd, &begin));
+
+        VkFenceCreateInfo fci{};
+        fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        VK_OR_DIE(vkCreateFence(vk->device, &fci, nullptr, &fence));
     }
 
-    // Record one dispatch. Caller must call `barrier()` between
-    // dispatches that read each other's outputs.
+    void shutdown() {
+        if (!vk) return;
+        if (fence) vkDestroyFence(vk->device, fence, nullptr);
+        if (cmd)   vkFreeCommandBuffers(vk->device, vk->cmd_pool, 1, &cmd);
+        vk = nullptr;
+        cmd = VK_NULL_HANDLE;
+        fence = VK_NULL_HANDLE;
+    }
+
+    // Reset the CB to recording state so the same batch object can
+    // be re-recorded for the next iter.
+    void begin() {
+        VK_OR_DIE(vkResetCommandBuffer(cmd, 0));
+        VkCommandBufferBeginInfo bi{};
+        bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        VK_OR_DIE(vkBeginCommandBuffer(cmd, &bi));
+    }
+
     void dispatch(VkPipeline pipeline, VkPipelineLayout layout,
                     VkDescriptorSet desc_set, std::uint32_t groups_x) {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
@@ -351,9 +370,9 @@ struct CommandBatch {
         vkCmdDispatch(cmd, groups_x, 1, 1);
     }
 
-    // Insert a global compute-stage memory barrier so subsequent
-    // dispatches see the writes from previous ones. Heavy-handed but
-    // correct; the perf-tuned variant uses per-buffer barriers.
+    // Heavy-handed compute->compute barrier; sufficient for our flow
+    // since iter ordering is sequential and we don't need overlap
+    // between dispatches that hit different buffers.
     void barrier() {
         VkMemoryBarrier mb{};
         mb.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -367,18 +386,13 @@ struct CommandBatch {
 
     void end_and_submit_wait() {
         VK_OR_DIE(vkEndCommandBuffer(cmd));
-        VkFenceCreateInfo fci{};
-        fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        VK_OR_DIE(vkCreateFence(vk->device, &fci, nullptr, &fence));
         VkSubmitInfo si{};
         si.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         si.commandBufferCount = 1;
         si.pCommandBuffers    = &cmd;
         VK_OR_DIE(vkQueueSubmit(vk->queue, 1, &si, fence));
         VK_OR_DIE(vkWaitForFences(vk->device, 1, &fence, VK_TRUE, UINT64_MAX));
-        vkDestroyFence(vk->device, fence, nullptr);
-        vkFreeCommandBuffers(vk->device, vk->cmd_pool, 1, &cmd);
-        cmd = VK_NULL_HANDLE; fence = VK_NULL_HANDLE;
+        VK_OR_DIE(vkResetFences(vk->device, 1, &fence));
     }
 };
 
