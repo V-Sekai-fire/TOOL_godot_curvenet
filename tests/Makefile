@@ -28,7 +28,13 @@ LIBRC := librapidcheck.a
 TESTS := test_halfedge test_polygon_laplacian test_dense_linalg test_scaled_frames test_cut_algorithm test_deform_solve test_halfedge_builder test_curvenet_builder test_surface_projection
 TEST_BINS := $(addprefix bin/,$(TESTS))
 
-.PHONY: all test clean
+BENCH_CXXFLAGS := -std=c++14 -O3 -DNDEBUG -Wall -Wno-missing-braces \
+                  -I$(SRC) -MMD -MP
+ifeq ($(UNAME_S),Darwin)
+  BENCH_CXXFLAGS += -stdlib=libc++
+endif
+
+.PHONY: all test bench clean
 all: $(TEST_BINS)
 
 $(LIBRC): $(RC_OBJ)
@@ -54,6 +60,12 @@ test: $(TEST_BINS)
 		echo ">> $$t"; \
 		$$t || exit 1; \
 	done
+
+bin/bench_deform: bench_deform.cpp | bin
+	$(CXX) $(BENCH_CXXFLAGS) -o $@ $<
+
+bench: bin/bench_deform
+	@bin/bench_deform
 
 clean:
 	rm -rf bin $(LIBRC)
