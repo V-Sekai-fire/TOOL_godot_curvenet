@@ -27,3 +27,4 @@ import Curvenet.DenseLinAlg
 import Curvenet.CutMeshLaplacian
 import Curvenet.HarmonicSolve
 import Curvenet.DeformSolve
+import Curvenet.CutAlgorithm
