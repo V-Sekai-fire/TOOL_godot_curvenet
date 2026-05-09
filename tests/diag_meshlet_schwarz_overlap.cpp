@@ -212,46 +212,14 @@ int main(int argc, char **argv) {
             cm::CutVertexKind::sample_kind(static_cast<int>(s), 0, false);
     }
     const double mol_delta = cml::default_mollify_delta(positions, tris);
-    sp::SparseMatrixCSR LhsM =
+    const sp::SparseMatrixCSR LhsM =
         cml::assemble_vt_lh_v_csr_robust(c, positions, mol_delta);
-
-    // Regularize sample slots.
-    {
-        std::vector<std::pair<std::pair<int,int>, double>> coo;
-        std::vector<std::uint8_t> is_sample_row(nv, 0);
-        for (std::size_t i = 0; i < nv; ++i) {
-            const int rs = LhsM.row_ptr[i];
-            const int re = LhsM.row_ptr[i + 1];
-            bool any_nonzero = false;
-            for (int k = rs; k < re; ++k) {
-                if (LhsM.values[k] != 0.0) { any_nonzero = true; break; }
-            }
-            if (!any_nonzero) is_sample_row[i] = 1;
-        }
-        for (std::size_t i = 0; i < nv; ++i) {
-            if (is_sample_row[i]) {
-                coo.push_back({ { static_cast<int>(i), static_cast<int>(i) }, 1.0 });
-                continue;
-            }
-            const int rs = LhsM.row_ptr[i];
-            const int re = LhsM.row_ptr[i + 1];
-            for (int k = rs; k < re; ++k) {
-                coo.push_back({ { static_cast<int>(i), LhsM.col_idx[k] },
-                                 LhsM.values[k] });
-            }
-        }
-        LhsM.row_ptr.assign(nv + 1, 0);
-        for (auto &p : coo) ++LhsM.row_ptr[p.first.first + 1];
-        for (std::size_t i = 0; i < nv; ++i) LhsM.row_ptr[i + 1] += LhsM.row_ptr[i];
-        LhsM.col_idx.assign(coo.size(), 0);
-        LhsM.values.assign(coo.size(), 0.0);
-        std::vector<int> cursor = LhsM.row_ptr;
-        for (auto &p : coo) {
-            const int idx = cursor[p.first.first]++;
-            LhsM.col_idx[idx] = p.first.second;
-            LhsM.values[idx]  = p.second;
-        }
-    }
+    // No asymmetric regularization. LhsM is SPD with a 4-dim null
+    // space (sample slots have zero rows + zero cols). Jacobi PCG
+    // handles this: apply_jacobi sets y[i] = 0 where diag[i] = 0,
+    // so CG never moves x at sample-slot verts. The synthetic RHS
+    // b = LhsM · y_seed has b[sample] = 0 (zero row), so the
+    // global x_global has x[sample] = 0 trivially.
 
     std::printf("Mire body: %zu verts, %zu tris\n", nv, mire_body::n_tris);
 
@@ -262,6 +230,15 @@ int main(int argc, char **argv) {
     const std::vector<double> b = sp::spmv(LhsM, y_seed);
     const std::vector<double> x_global =
         sp::cg(LhsM, b, std::max<std::size_t>(2000, nv), 1e-10);
+    {
+        const std::vector<double> Ax = sp::spmv(LhsM, x_global);
+        double mr = 0.0;
+        for (std::size_t i = 0; i < nv; ++i) {
+            const double r = std::fabs(Ax[i] - b[i]);
+            if (r > mr) mr = r;
+        }
+        std::printf("Global CG max_resid: %.4e\n", mr);
+    }
 
     // Meshlet partition.
     std::vector<float> mp(nv * 3);
@@ -345,10 +322,14 @@ int main(int argc, char **argv) {
     // dispatching one would damp additive with ω≈0.5 instead.
     std::vector<double> x(nv, 0.0);
 
+    // Track ‖Ax - b‖∞ as the convergence metric. The error vs x_global
+    // can be misleading because LhsM has a 4D null space (sample-slot
+    // rows are all zero), so x_schwarz and x_global may legitimately
+    // differ by a null-space vector while both solving Ax = b.
     std::printf("Multiplicative Schwarz with 1-ring overlap:\n");
-    std::printf("%-4s  %-12s  %-12s  %-12s\n",
-                  "iter", "max_err", "rms_err", "delta_x");
-    std::printf("------------------------------------------------------\n");
+    std::printf("%-4s  %-12s  %-12s  %-12s  %-12s\n",
+                  "iter", "max_err", "max_resid", "rms_err", "delta_x");
+    std::printf("------------------------------------------------------------------\n");
 
     const std::size_t max_outer = 80;
     for (std::size_t outer = 0; outer < max_outer; ++outer) {
@@ -370,21 +351,25 @@ int main(int argc, char **argv) {
             }
         }
 
+        const std::vector<double> Ax = sp::spmv(LhsM, x);
         double max_err = 0.0;
+        double max_resid = 0.0;
         double sum_sq  = 0.0;
         double max_dx  = 0.0;
         for (std::size_t i = 0; i < nv; ++i) {
             const double e = std::fabs(x[i] - x_global[i]);
             const double dx = std::fabs(x[i] - x_at_start[i]);
+            const double r  = std::fabs(Ax[i] - b[i]);
             sum_sq += e * e;
-            if (e > max_err) max_err = e;
-            if (dx > max_dx) max_dx = dx;
+            if (e > max_err)   max_err = e;
+            if (dx > max_dx)   max_dx = dx;
+            if (r > max_resid) max_resid = r;
         }
         const double rms = std::sqrt(sum_sq / nv);
-        std::printf("%-4zu  %-12.4e  %-12.4e  %-12.4e\n",
-                      outer, max_err, rms, max_dx);
-        if (max_err < 1e-7) {
-            std::printf("converged (max_err < 1e-7) after %zu outer iters\n", outer + 1);
+        std::printf("%-4zu  %-12.4e  %-12.4e  %-12.4e  %-12.4e\n",
+                      outer, max_err, max_resid, rms, max_dx);
+        if (max_resid < 1e-7) {
+            std::printf("converged (max_resid < 1e-7) after %zu outer iters\n", outer + 1);
             break;
         }
     }
