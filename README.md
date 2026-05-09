@@ -57,17 +57,19 @@ the math as `def`s and `native_decide`s concrete property checks.
 | 1 | Cubic Bezier eval + derivative | 6 | green |
 | 2 | Closed-loop profile curve | 7 | green |
 | 3 | Bilinear Coons patch (quads) | 6 | green |
-| 4 | N-gon patch scaffold (N=4 path) | 3 | green |
+| 4 | N-gon patch (N=3 + N=4; N≥5 TODO) | 6 | green |
 | 5 | Mesh binding & deformation | 5 | green |
-| 6 | `CurveNetDeformer3D` Godot node | — | scons-builds; deform-from-curves WIP |
+| 6 | `CurveNetDeformer3D` Godot node | — | full pipeline live (`scons` clean) |
 | 7 | Tris-to-quads via LEMON matching | 5 | green |
-| 8 | LEMON `-fno-exceptions` patch | — | green (extension compiles cleanly) |
-| 9 | Lean4 proof companion | 12 instance theorems | green (`lake build` passes) |
+| 8 | LEMON `-fno-exceptions` patch | — | green |
+| 9 | Lean4 proof companion | 17 instance theorems | green (`lake build` passes) |
+| — | Bilinear inverse (Gauss-Newton) | 6 | green |
+| — | Mesh binding (`bind_polymesh`) | 4 | green |
+| — | End-to-end pipeline integration | 3 | green |
 
-**RapidCheck:** 32 properties × 100 random cases = 3,200 checks passing.
-**Lean4:** 12 `native_decide` corner-recovery theorems passing on Float-valued
-specifications mirroring the C++ math. Generic-over-ℝ theorems deferred until
-Mathlib is wired in.
+**RapidCheck:** 48 properties × 100 random cases = **4,800 checks passing**.
+**Lean4:** 17 `native_decide` corner-recovery theorems on Float-valued
+specifications. Generic-over-ℝ theorems deferred until Mathlib is wired in.
 
 ## Acknowledgements
 

@@ -17,3 +17,4 @@ Status:
 import Curvenet.Vec3
 import Curvenet.Bezier
 import Curvenet.CoonsPatch
+import Curvenet.NgonPatch
