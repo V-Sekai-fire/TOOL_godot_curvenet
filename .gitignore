@@ -88,3 +88,8 @@ src/gen/
 # only need to be present locally when re-baking.
 demo/character/*.blend
 demo/character/*.glb
+
+# 6.4 MB header from `Body` subdivided 2x for the 70k-vert
+# benchmark. Regenerated via `make -C tests bench_70k_data` (or by
+# hand via Blender MCP). Doesn't belong in git.
+tests/mire_body_70k_data.h

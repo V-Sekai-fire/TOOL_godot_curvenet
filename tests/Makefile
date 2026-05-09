@@ -156,6 +156,12 @@ bin/bench_deform: bench_deform.cpp mire_body_data.h | bin
 bench: bin/bench_deform
 	@bin/bench_deform
 
+bin/bench_deform_70k: bench_deform_70k.cpp mire_body_70k_data.h | bin
+	$(CXX) $(BENCH_CXXFLAGS) -o $@ $<
+
+bench_70k: bin/bench_deform_70k
+	@bin/bench_deform_70k
+
 bin/diag_real_mesh: diag_real_mesh.cpp mire_body_data.h | bin
 	$(CXX) $(BENCH_CXXFLAGS) -o $@ $<
 
