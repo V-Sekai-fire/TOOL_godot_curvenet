@@ -207,6 +207,12 @@ bin/diag_meshlet_schwarz_overlap: diag_meshlet_schwarz_overlap.cpp mire_body_dat
 diag_meshlet_schwarz_overlap: bin/diag_meshlet_schwarz_overlap
 	@bin/diag_meshlet_schwarz_overlap
 
+bin/diag_meshlet_pcg: diag_meshlet_pcg.cpp mire_body_data.h $(MESHOPT_OBJ) | bin
+	$(CXX) $(BENCH_CXXFLAGS) -I$(MESHOPT_DIR)/src -o $@ $< $(MESHOPT_OBJ)
+
+diag_meshlet_pcg: bin/diag_meshlet_pcg
+	@bin/diag_meshlet_pcg
+
 clean:
 	rm -rf bin $(LIBRC)
 	find $(RC)/src -name "*.o" -delete
