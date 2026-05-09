@@ -115,6 +115,21 @@ def vecWithinEps (a b : Array Float) (eps : Float) : Bool := Id.run do
     if (a[i]! - b[i]!).abs ≥ eps then return false
   return true
 
+/-- Solve A · X = B for n×n A and n×k B, column by column. Returns n×k X.
+   Naive — re-runs Gaussian elimination per column. Slice 5's `solve` is
+   re-used as-is; the C++ runtime will swap in a once-and-reuse LU/Cholesky
+   factorization. -/
+def solveMulti (n k : Nat) (A : Mat) (B : Mat) : Mat := Id.run do
+  let mut X : Mat := zeros n k
+  for col in [0:k] do
+    let mut bCol : Array Float := Array.replicate n 0.0
+    for i in [0:n] do
+      bCol := bCol.set! i (get B k i col)
+    let xCol := solve n A bCol
+    for i in [0:n] do
+      X := set X k i col xCol[i]!
+  return X
+
 /-- Element-wise tolerance check for matrices in row-major form. -/
 def matWithinEps (a b : Mat) (n m : Nat) (eps : Float) : Bool := Id.run do
   for i in [0:n] do
