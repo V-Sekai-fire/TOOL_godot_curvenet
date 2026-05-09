@@ -263,6 +263,12 @@ bin/diag_meshlet_chebyshev_70k: diag_meshlet_chebyshev_70k.cpp mire_body_70k_dat
 diag_meshlet_chebyshev_70k: bin/diag_meshlet_chebyshev_70k
 	@bin/diag_meshlet_chebyshev_70k
 
+bin/diag_two_level_schwarz_5k: diag_two_level_schwarz_5k.cpp mire_body_data.h $(MESHOPT_OBJ) | bin
+	$(CXX) $(BENCH_CXXFLAGS) -I$(MESHOPT_DIR)/src -o $@ $< $(MESHOPT_OBJ)
+
+diag_two_level_schwarz_5k: bin/diag_two_level_schwarz_5k
+	@bin/diag_two_level_schwarz_5k
+
 clean:
 	rm -rf bin $(LIBRC)
 	find $(RC)/src -name "*.o" -delete
