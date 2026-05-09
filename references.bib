@@ -176,6 +176,126 @@
 }
 
 % =================================================================
+% Domain decomposition + Schwarz iteration — used by the meshlet
+% decomposition path (tests/diag_meshlet_*.cpp). Smith / Bjørstad /
+% Gropp is the canonical textbook on additive / multiplicative
+% Schwarz, two-level methods, and convergence theory. Saad covers
+% Schur complement and Schwarz-as-preconditioner for Krylov methods,
+% which is the path the meshlet pcg diagnostic implements.
+% =================================================================
+
+@book{Smith1996DomainDecomposition,
+  author    = {Smith, Barry F. and Bj{\o}rstad, Petter E. and Gropp, William D.},
+  title     = {Domain Decomposition: Parallel Multilevel Methods for
+               Elliptic Partial Differential Equations},
+  publisher = {Cambridge University Press},
+  year      = {1996},
+  isbn      = {0-521-49589-X}
+}
+
+@book{Saad2003IterativeMethods,
+  author    = {Saad, Yousef},
+  title     = {Iterative Methods for Sparse Linear Systems},
+  edition   = {2nd},
+  publisher = {SIAM},
+  year      = {2003},
+  doi       = {10.1137/1.9780898718003}
+}
+
+% =================================================================
+% Tikhonov regularization — small `λ I` added to the diagonal of a
+% near-singular SPD matrix so factorization (e.g. Cholesky) doesn't
+% break on the rank-deficient direction. Used in the meshlet
+% Cholesky path because the per-meshlet principal sub-matrix can be
+% near-PSD on certain partitions.
+% =================================================================
+
+@article{Tikhonov1963Regularization,
+  author  = {Tikhonov, Andrey N.},
+  title   = {Solution of incorrectly formulated problems and the
+             regularization method},
+  journal = {Soviet Mathematics Doklady},
+  volume  = {4},
+  year    = {1963},
+  pages   = {1035--1038}
+}
+
+% =================================================================
+% Cholesky factorization — the canonical method for SPD systems.
+% Cholesky's manuscript was published posthumously by Benoît.
+% =================================================================
+
+@article{Benoit1924Cholesky,
+  author  = {Benoit, Cdt.},
+  title   = {Note sur une m{\'e}thode de r{\'e}solution des
+             {\'e}quations normales provenant de l'application de la
+             m{\'e}thode des moindres carr{\'e}s {\`a} un syst{\`e}me
+             d'{\'e}quations lin{\'e}aires en nombre inf{\'e}rieur
+             {\`a} celui des inconnues. Application de la m{\'e}thode
+             {\`a} la r{\'e}solution d'un syst{\`e}me d{\'e}fini
+             d'{\'e}quations lin{\'e}aires (Procède du Commandant
+             Cholesky)},
+  journal = {Bulletin G{\'e}od{\'e}sique},
+  volume  = {2},
+  number  = {1},
+  year    = {1924},
+  pages   = {66--77},
+  doi     = {10.1007/BF03031308}
+}
+
+% =================================================================
+% Meshlet decomposition + mesh shaders — meshoptimizer's
+% buildMeshlets follows the design Kerbl et al. and the NVIDIA
+% mesh-shader paper popularised. Used here for the constant-work
+% partition of the input mesh into bounded-size clusters.
+% =================================================================
+
+@misc{Zeux2018Meshoptimizer,
+  author       = {Kapoulkine, Arseny},
+  title        = {meshoptimizer},
+  howpublished = {\url{https://github.com/zeux/meshoptimizer}},
+  year         = {2018--2026}
+}
+
+@misc{NVIDIA2018MeshShaders,
+  author       = {{NVIDIA}},
+  title        = {Mesh Shaders / Turing Architecture White Paper —
+                  meshlet construction guidelines},
+  howpublished = {\url{https://developer.nvidia.com/blog/introduction-turing-mesh-shaders/}},
+  year         = {2018}
+}
+
+% =================================================================
+% Constant-work design — AWS Builders' Library article on
+% reliability and constant work, motivating the meshlet-based per-
+% frame budget that's bounded by meshlet count rather than mesh
+% size.
+% =================================================================
+
+@misc{AWS2020ConstantWork,
+  author       = {Hykes, Solomon},
+  title        = {Reliability, constant work, and a good cup of coffee
+                  (AWS Builders' Library)},
+  howpublished = {\url{https://aws.amazon.com/builders-library/reliability-and-constant-work/}},
+  year         = {2020}
+}
+
+% =================================================================
+% Gall's law — operating principle invoked throughout the meshlet
+% / robust-Laplacian / GPU-kernel work: complex systems must evolve
+% from working simple systems, not be designed from scratch. Cited
+% in commit messages and PERF_BASELINE.md.
+% =================================================================
+
+@book{Gall1977Systemantics,
+  author    = {Gall, John},
+  title     = {Systemantics: How Systems Work and Especially How They
+               Fail},
+  publisher = {Quadrangle / The New York Times Book Company},
+  year      = {1977}
+}
+
+% =================================================================
 % Manifold pre-processor — todos/06 locks in fTetWild as the runtime
 % manifold-repair pass before the cut-mesh algorithm runs.
 % =================================================================
