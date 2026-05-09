@@ -24,6 +24,7 @@ import Curvenet.PolygonLaplacian
 import Curvenet.CutMesh
 import Curvenet.ScaledFrames
 import Curvenet.DenseLinAlg
+import Curvenet.SparseLinAlg
 import Curvenet.CutMeshLaplacian
 import Curvenet.HarmonicSolve
 import Curvenet.DeformSolve
