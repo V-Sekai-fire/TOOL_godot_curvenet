@@ -14,7 +14,7 @@ CXXFLAGS := -std=c++14 -O0 -g -Wall -Wno-missing-braces -Wno-unused-command-line
             -I$(RC)/include -I$(LEMON) -I$(SRC) -MMD -MP
 LDLIBS := -lpthread
 
-CURVENET_OBJ := $(SRC)/curvenet/tris_to_quads.o
+CURVENET_OBJ := $(SRC)/curvenet/tris_to_quads.o $(SRC)/curvenet/curvenet.o
 
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
@@ -25,7 +25,7 @@ RC_SRC := $(shell find $(RC)/src -name "*.cpp")
 RC_OBJ := $(RC_SRC:.cpp=.o)
 LIBRC := librapidcheck.a
 
-TESTS := test_bezier test_profile_curve test_coons_patch test_ngon_patch test_tris_to_quads
+TESTS := test_bezier test_profile_curve test_coons_patch test_ngon_patch test_tris_to_quads test_curvenet
 TEST_BINS := $(addprefix bin/,$(TESTS))
 
 .PHONY: all test clean
