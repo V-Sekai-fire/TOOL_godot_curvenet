@@ -62,17 +62,24 @@ else
   GPU_RUN_ENV     :=
 endif
 
-bin/spmv.spv: $(SRC)/curvenet/shaders/spmv.comp | bin
+bin/%.spv: $(SRC)/curvenet/shaders/%.comp | bin
 ifeq ($(GLSLANG),)
 	$(error glslangValidator not found. Install with: brew install glslang)
 endif
 	$(GLSLANG) -V $< -o $@
 
-bin/gpu_spmv_test: gpu_spmv_test.cpp | bin
+bin/gpu_spmv_test: gpu_spmv_test.cpp gpu_compute_helpers.h | bin
 	$(CXX) $(GPU_CXXFLAGS) -o $@ $< $(GPU_LDFLAGS)
 
-gpu: bin/gpu_spmv_test bin/spmv.spv
+bin/gpu_dot_test: gpu_dot_test.cpp gpu_compute_helpers.h | bin
+	$(CXX) $(GPU_CXXFLAGS) -o $@ $< $(GPU_LDFLAGS)
+
+gpu: bin/gpu_spmv_test bin/spmv.spv bin/gpu_dot_test bin/dot_reduce.spv
+	@echo ">> spmv"
 	@$(GPU_RUN_ENV) bin/gpu_spmv_test bin/spmv.spv
+	@echo ""
+	@echo ">> dot_reduce (df32)"
+	@$(GPU_RUN_ENV) bin/gpu_dot_test bin/dot_reduce.spv
 
 $(LIBRC): $(RC_OBJ)
 	ar rcs $@ $(RC_OBJ)
