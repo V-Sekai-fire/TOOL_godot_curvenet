@@ -82,5 +82,54 @@ int main() {
 		RC_ASSERT(cnt::approx_eq(ng.evaluate(s, t) + d, ng2.evaluate(s, t), 1e-9));
 	});
 
+	auto gen_tri_patch = [&]() {
+		return rc::gen::map(
+				rc::gen::tuple(gen_vec(), gen_vec(), gen_vec(),
+						gen_vec(), gen_vec(),
+						gen_vec(), gen_vec(),
+						gen_vec(), gen_vec()),
+				[](std::tuple<Vec3, Vec3, Vec3, Vec3, Vec3, Vec3, Vec3, Vec3, Vec3> t) {
+					const Vec3 P0 = std::get<0>(t);
+					const Vec3 P1 = std::get<1>(t);
+					const Vec3 P2 = std::get<2>(t);
+					NgonPatch ng;
+					ng.boundaries.push_back(BoundaryCurve{ P0, std::get<3>(t), std::get<4>(t), P1 });
+					ng.boundaries.push_back(BoundaryCurve{ P1, std::get<5>(t), std::get<6>(t), P2 });
+					ng.boundaries.push_back(BoundaryCurve{ P2, std::get<7>(t), std::get<8>(t), P0 });
+					return ng;
+				});
+	};
+
+	ok &= rc::check("3-sided NgonPatch corner recovery", [&] {
+		NgonPatch ng = *gen_tri_patch();
+		// (0,0) -> P0, (1,0) -> P1, (anything, 1) -> P2.
+		RC_ASSERT(cnt::approx_eq(ng.evaluate(0.0, 0.0), ng.boundaries[0].c0, 1e-9));
+		RC_ASSERT(cnt::approx_eq(ng.evaluate(1.0, 0.0), ng.boundaries[0].c3, 1e-9));
+		RC_ASSERT(cnt::approx_eq(ng.evaluate(0.0, 1.0), ng.boundaries[1].c3, 1e-9));
+		RC_ASSERT(cnt::approx_eq(ng.evaluate(1.0, 1.0), ng.boundaries[1].c3, 1e-9));
+	});
+
+	ok &= rc::check("3-sided NgonPatch translation invariance", [&](Vec3 d) {
+		NgonPatch ng = *gen_tri_patch();
+		NgonPatch ng2 = ng;
+		for (auto &b : ng2.boundaries) {
+			b.c0 = b.c0 + d;
+			b.c1 = b.c1 + d;
+			b.c2 = b.c2 + d;
+			b.c3 = b.c3 + d;
+		}
+		double s = *cnt::unit_t();
+		double t = *cnt::unit_t();
+		RC_ASSERT(cnt::approx_eq(ng.evaluate(s, t) + d, ng2.evaluate(s, t), 1e-9));
+	});
+
+	ok &= rc::check("3-sided NgonPatch bottom edge recovers boundaries[0]", [&] {
+		NgonPatch ng = *gen_tri_patch();
+		double s = *cnt::unit_t();
+		Vec3 a = ng.evaluate(s, 0.0);
+		Vec3 b = ng.boundaries[0].evaluate(s);
+		RC_ASSERT(cnt::approx_eq(a, b, 1e-9));
+	});
+
 	return ok ? 0 : 1;
 }

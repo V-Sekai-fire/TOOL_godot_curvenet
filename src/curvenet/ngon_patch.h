@@ -39,11 +39,23 @@ struct NgonPatch {
 			c.v0 = BoundaryCurve{ boundaries[3].c3, boundaries[3].c2, boundaries[3].c1, boundaries[3].c0 };
 			return c.evaluate(s, t);
 		}
-		// TODO(N=3, N>=5): Hormann-Floater mean-value coordinates over a regular N-gon domain.
-		// Each side i contributes C_i(s_i(p)) weighted by α_i(p) such that:
-		//   α_i = 1 on side i, α_j = 0 on side j != i (boundary recovery),
-		//   Σ α_i = 1 (translation invariance).
-		// Returning NaN until implemented so callers can detect.
+		if (sides == 3) {
+			// Degenerate Coons: triangle (P0, P1, P2) with CCW edges
+			//   boundaries[0] = P0->P1, boundaries[1] = P1->P2, boundaries[2] = P2->P0.
+			// Map (s, t) ∈ [0, 1]² to the triangle so the v=1 edge collapses to P2:
+			//   u0(u) = boundaries[0]                        (P0 -> P1, bottom, v=0)
+			//   v1(v) = boundaries[1]                        (P1 -> P2, right, u=1)
+			//   v0(v) = reverse(boundaries[2])               (P0 -> P2, left, u=0)
+			//   u1(u) = constant P2                          (top edge collapsed)
+			const Vec3 P2 = boundaries[1].c3; // = boundaries[2].c0
+			CoonsPatch c;
+			c.u0 = boundaries[0];
+			c.v1 = boundaries[1];
+			c.v0 = BoundaryCurve{ boundaries[2].c3, boundaries[2].c2, boundaries[2].c1, boundaries[2].c0 };
+			c.u1 = BoundaryCurve{ P2, P2, P2, P2 };
+			return c.evaluate(s, t);
+		}
+		// TODO(N>=5): Hormann-Floater mean-value coordinates over a regular N-gon domain.
 		const double nan_val = std::nan("");
 		return Vec3{ nan_val, nan_val, nan_val };
 	}
