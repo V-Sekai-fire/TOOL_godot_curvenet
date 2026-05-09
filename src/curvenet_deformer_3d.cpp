@@ -47,6 +47,8 @@ void CurveNetDeformer3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_face_count"), &CurveNetDeformer3D::get_face_count);
 	ClassDB::bind_method(D_METHOD("get_face_vertex_count", "face_index"), &CurveNetDeformer3D::get_face_vertex_count);
 	ClassDB::bind_method(D_METHOD("evaluate_face", "face_index", "s", "t"), &CurveNetDeformer3D::evaluate_face);
+
+	ADD_SIGNAL(MethodInfo("_curvenet_redraw_request"));
 }
 
 void CurveNetDeformer3D::invalidate_cache() {
@@ -320,6 +322,9 @@ void CurveNetDeformer3D::apply_deformation() {
 		static_cast<int>(profile_curves.size()), " profiles, ",
 		nc, " sample columns, ",
 		static_cast<int>(nv), " verts deformed");
+
+	// Tell the editor gizmo (if present) to refresh.
+	emit_signal("_curvenet_redraw_request");
 }
 
 int CurveNetDeformer3D::get_face_count() const {

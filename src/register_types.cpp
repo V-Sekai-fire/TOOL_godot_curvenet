@@ -3,6 +3,8 @@
 #include "register_types.h"
 
 #include "curvenet_deformer_3d.h"
+#include "curvenet_editor_plugin.h"
+#include "curvenet_gizmo_plugin.h"
 #include "vertex_handles_3d.h"
 #include "vertex_handles_editor_plugin.h"
 #include "vertex_handles_gizmo_plugin.h"
@@ -24,6 +26,9 @@ void initialize_gdextension_types(ModuleInitializationLevel p_level) {
 		ClassDB::register_class<VertexHandlesGizmoPlugin>();
 		ClassDB::register_class<VertexHandlesEditorPlugin>();
 		EditorPlugins::add_by_type<VertexHandlesEditorPlugin>();
+		ClassDB::register_class<CurveNetGizmoPlugin>();
+		ClassDB::register_class<CurveNetEditorPlugin>();
+		EditorPlugins::add_by_type<CurveNetEditorPlugin>();
 	}
 }
 
