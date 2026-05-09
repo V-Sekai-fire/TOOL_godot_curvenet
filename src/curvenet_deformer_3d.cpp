@@ -66,6 +66,7 @@ void CurveNetDeformer3D::invalidate_cache() {
 	rest_cache.Vt.clear();
 	rest_cache.LhS.clear();
 	rest_cache.LhsM.clear();
+	rest_cache.lhs_factor = curvenet::dense::LUFactor{};
 	rest_cache.nc = 0;
 	rest_cache.source_hash = 0;
 }
@@ -254,6 +255,10 @@ void CurveNetDeformer3D::apply_deformation() {
 			rest_cache.Lh, rest_cache.V);
 		rest_cache.LhsM = curvenet::dense::mat_mul(nv_assembled, nh_assembled, nv_assembled,
 			rest_cache.Vt, rest_cache.LhS);
+		// Factor LhsM once now so per-frame solves are O(nv²) back-subs
+		// instead of repeating Gaussian elim from scratch per RHS column.
+		rest_cache.lhs_factor =
+			curvenet::dense::factorize_lu(nv_assembled, rest_cache.LhsM);
 
 		rest_cache.source_hash = hash_val;
 		rest_cache.valid = true;
@@ -367,7 +372,8 @@ void CurveNetDeformer3D::apply_deformation() {
 	for (std::size_t i = 0; i < nv * 9; ++i) {
 		rhs_a[i] = -Vt_Lh_CFc[i];
 	}
-	const std::vector<double> Fv = curvenet::dense::solve_multi(nv, 9, rest_cache.LhsM, rhs_a);
+	const std::vector<double> Fv =
+		curvenet::dense::solve_multi_with_lu(rest_cache.lhs_factor, 9, rhs_a);
 
 	// Bridge (Eq. 3 + per-face average): build F_f and y_h.
 	const std::vector<double> Fh =
@@ -394,7 +400,8 @@ void CurveNetDeformer3D::apply_deformation() {
 	for (std::size_t i = 0; i < nv * 3; ++i) {
 		rhs_b[i] = -Vt_Lh_diff[i];
 	}
-	const std::vector<double> Xv = curvenet::dense::solve_multi(nv, 3, rest_cache.LhsM, rhs_b);
+	const std::vector<double> Xv =
+		curvenet::dense::solve_multi_with_lu(rest_cache.lhs_factor, 3, rhs_b);
 
 	// Emit the deformed mesh — bypassing SurfaceTool's generate_normals
 	// vertex splits keeps the original vertex count and preserves index

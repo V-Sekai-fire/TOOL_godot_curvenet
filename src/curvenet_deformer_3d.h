@@ -4,6 +4,7 @@
 #define CURVENET_DEFORMER_3D_H
 
 #include "curvenet/cut_mesh.h"
+#include "curvenet/dense_linalg.h"
 #include "curvenet/halfedge.h"
 #include "curvenet/vec3.h"
 
@@ -59,6 +60,7 @@ class CurveNetDeformer3D : public MeshInstance3D {
 		std::vector<double>                   Vt;               // nv × nh transpose
 		std::vector<double>                   LhS;              // nh × nv cached Lₕ·V
 		std::vector<double>                   LhsM;             // nv × nv shared LHS Vᵀ·Lₕ·V
+		curvenet::dense::LUFactor             lhs_factor;       // factor-once LU of LhsM (perf win #2)
 		int                                   nc          = 0;  // number of sample columns
 		std::uint64_t                         source_hash = 0;
 	};
