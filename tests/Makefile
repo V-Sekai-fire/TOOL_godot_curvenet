@@ -189,6 +189,12 @@ bin/diag_meshlet_lhsm: diag_meshlet_lhsm.cpp mire_body_data.h $(MESHOPT_OBJ) | b
 diag_meshlet_lhsm: bin/diag_meshlet_lhsm
 	@bin/diag_meshlet_lhsm
 
+bin/diag_meshlet_solve: diag_meshlet_solve.cpp mire_body_data.h $(MESHOPT_OBJ) | bin
+	$(CXX) $(BENCH_CXXFLAGS) -I$(MESHOPT_DIR)/src -o $@ $< $(MESHOPT_OBJ)
+
+diag_meshlet_solve: bin/diag_meshlet_solve
+	@bin/diag_meshlet_solve
+
 clean:
 	rm -rf bin $(LIBRC)
 	find $(RC)/src -name "*.o" -delete
