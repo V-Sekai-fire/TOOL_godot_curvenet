@@ -21,14 +21,34 @@ projected to the closest body vertices.
 
 ### Current — robust path (Sharp & Crane 2020 mollification)
 
-| label                       | nv   | nh    | nc | bind ms | frame ms | frames/s |
-|-----------------------------|------|-------|----|---------|----------|----------|
-| Mire body, 4-sample loop    | 5485 | 30856 | 4  |  421    |    91    |    11    |
-| Mire body, 8-sample loop    | 5485 | 30856 | 8  |  423    |    90    |    11    |
+| label                       | nv    | nh     | nc | bind ms | frame ms  | frames/s |
+|-----------------------------|-------|--------|----|---------|-----------|----------|
+| Mire body, 4-sample loop    |  5485 |  30856 | 4  |     421 |        91 |     11   |
+| Mire body, 8-sample loop    |  5485 |  30856 | 8  |     423 |        90 |     11   |
+| Mire body 2× subdivided     | 81613 | 481840 | 4  | **102000**  | **~80000** | **0.01** |
 
-11 FPS on the actual character mesh — interactive, not 90 Hz, but
-well into "playable" territory. This is the deployment-relevant
-number; the synthetic plane numbers below are diagnostic.
+The 81k row is the actual PCVR-target measurement (81,613 verts, 159k
+tris, baked from `MireQuest.blend` after 2× edge-subdivide). The
+working monolithic system is **5000× short** of the 11 ms / 90 FPS
+budget at this scale. Two distinct bottlenecks:
+
+* **Bind = 102 sec.** `cut_mesh_laplacian::assemble_lh_csr_robust` and
+  `assemble_vt_lh_v_csr_robust` both accumulate non-zeros into
+  `std::map<std::pair<int,int>, double>`. At 1.4M COO entries the map
+  overhead dominates. A flat sorted vector + radix sort would shave
+  this to 1-2 s (independent of solver choice).
+* **Solve = 162 sec for 12 RHS.** CG iter count grows faster than √n
+  on character-topology cot-Laplacians; per-RHS cold-start is 13.5 s.
+  Warm-start halves it but doesn't fit the per-frame budget.
+
+The meshlet decomposition path (per-meshlet ~256×256 matrices solved
+independently with cached Cholesky) sidesteps both — per-meshlet bind
+is small enough that `std::map` is fine, per-meshlet cold-CG is fast
+on a small system. Tracked under `tests/diag_meshlet_*.cpp` and
+extrapolated separately.
+
+5485-vert numbers are the deployment-validated CPU ceiling and what
+the demo scene currently ships.
 
 ### Before — non-robust cot (broken on real meshes)
 
