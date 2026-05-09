@@ -221,6 +221,104 @@ inline bool vec_close(const std::vector<double> &a, const std::vector<double> &b
     return true;
 }
 
+// Shorthand pipeline + descriptor set wiring for the simple "1 uniform
+// + N storage buffers" kernels used throughout the GPU CG path.
+struct ComputeKernel {
+    VkDescriptorSetLayout dsl       = VK_NULL_HANDLE;
+    VkPipelineLayout      layout    = VK_NULL_HANDLE;
+    VkShaderModule        shader    = VK_NULL_HANDLE;
+    VkPipeline            pipeline  = VK_NULL_HANDLE;
+    std::uint32_t         storage_count = 0;
+
+    void init(VkDevice device, const std::vector<std::uint32_t> &spv,
+               std::uint32_t n_storage) {
+        storage_count = n_storage;
+        std::vector<VkDescriptorSetLayoutBinding> bindings(1 + n_storage);
+        bindings[0].binding         = 0;
+        bindings[0].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        bindings[0].descriptorCount = 1;
+        bindings[0].stageFlags      = VK_SHADER_STAGE_COMPUTE_BIT;
+        for (std::uint32_t i = 0; i < n_storage; ++i) {
+            bindings[1 + i].binding         = 1 + i;
+            bindings[1 + i].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            bindings[1 + i].descriptorCount = 1;
+            bindings[1 + i].stageFlags      = VK_SHADER_STAGE_COMPUTE_BIT;
+        }
+        VkDescriptorSetLayoutCreateInfo dlci{};
+        dlci.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        dlci.bindingCount = static_cast<std::uint32_t>(bindings.size());
+        dlci.pBindings    = bindings.data();
+        VK_OR_DIE(vkCreateDescriptorSetLayout(device, &dlci, nullptr, &dsl));
+
+        VkPipelineLayoutCreateInfo plci{};
+        plci.sType          = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        plci.setLayoutCount = 1;
+        plci.pSetLayouts    = &dsl;
+        VK_OR_DIE(vkCreatePipelineLayout(device, &plci, nullptr, &layout));
+
+        VkShaderModuleCreateInfo smci{};
+        smci.sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+        smci.codeSize = spv.size() * sizeof(std::uint32_t);
+        smci.pCode    = spv.data();
+        VK_OR_DIE(vkCreateShaderModule(device, &smci, nullptr, &shader));
+
+        VkComputePipelineCreateInfo cpci{};
+        cpci.sType        = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+        cpci.stage.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        cpci.stage.stage  = VK_SHADER_STAGE_COMPUTE_BIT;
+        cpci.stage.module = shader;
+        cpci.stage.pName  = "main";
+        cpci.layout       = layout;
+        VK_OR_DIE(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &cpci,
+                                            nullptr, &pipeline));
+    }
+
+    void shutdown(VkDevice device) {
+        if (pipeline) vkDestroyPipeline(device, pipeline, nullptr);
+        if (shader)   vkDestroyShaderModule(device, shader, nullptr);
+        if (layout)   vkDestroyPipelineLayout(device, layout, nullptr);
+        if (dsl)      vkDestroyDescriptorSetLayout(device, dsl, nullptr);
+        *this = ComputeKernel{};
+    }
+};
+
+// Allocate a descriptor set and bind {1 uniform} + {N storage} buffers
+// to it. The buffers must outlive the descriptor set.
+inline VkDescriptorSet alloc_and_bind(VkDevice device,
+                                        VkDescriptorPool pool,
+                                        VkDescriptorSetLayout dsl,
+                                        const Buffer &uniform,
+                                        const std::vector<Buffer> &storage) {
+    VkDescriptorSetAllocateInfo dsai{};
+    dsai.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    dsai.descriptorPool     = pool;
+    dsai.descriptorSetCount = 1;
+    dsai.pSetLayouts        = &dsl;
+    VkDescriptorSet set = VK_NULL_HANDLE;
+    VK_OR_DIE(vkAllocateDescriptorSets(device, &dsai, &set));
+
+    std::vector<VkDescriptorBufferInfo> infos(1 + storage.size());
+    infos[0] = { uniform.handle, 0, VK_WHOLE_SIZE };
+    for (std::size_t i = 0; i < storage.size(); ++i) {
+        infos[1 + i] = { storage[i].handle, 0, VK_WHOLE_SIZE };
+    }
+    std::vector<VkWriteDescriptorSet> writes(infos.size());
+    for (std::size_t i = 0; i < writes.size(); ++i) {
+        writes[i] = {};
+        writes[i].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[i].dstSet          = set;
+        writes[i].dstBinding      = static_cast<std::uint32_t>(i);
+        writes[i].descriptorCount = 1;
+        writes[i].descriptorType  = (i == 0)
+            ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+            : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[i].pBufferInfo     = &infos[i];
+    }
+    vkUpdateDescriptorSets(device, static_cast<std::uint32_t>(writes.size()),
+                            writes.data(), 0, nullptr);
+    return set;
+}
+
 inline void run_compute_once(const VulkanCompute &vk, VkPipeline pipeline,
                                 VkPipelineLayout layout, VkDescriptorSet desc_set,
                                 std::uint32_t groups_x) {

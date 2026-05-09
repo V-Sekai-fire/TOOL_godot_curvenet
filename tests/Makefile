@@ -77,9 +77,13 @@ bin/gpu_dot_test: gpu_dot_test.cpp gpu_compute_helpers.h | bin
 bin/gpu_vec_ops_test: gpu_vec_ops_test.cpp gpu_compute_helpers.h | bin
 	$(CXX) $(GPU_CXXFLAGS) -o $@ $< $(GPU_LDFLAGS)
 
+bin/gpu_cg_test: gpu_cg_test.cpp gpu_compute_helpers.h gpu_cg_solver.h | bin
+	$(CXX) $(GPU_CXXFLAGS) -o $@ $< $(GPU_LDFLAGS)
+
 gpu: bin/gpu_spmv_test bin/spmv.spv \
      bin/gpu_dot_test bin/dot_reduce.spv \
-     bin/gpu_vec_ops_test bin/axpy.spv bin/jacobi.spv bin/saxpby.spv
+     bin/gpu_vec_ops_test bin/axpy.spv bin/jacobi.spv bin/saxpby.spv \
+     bin/gpu_cg_test
 	@echo ">> spmv"
 	@$(GPU_RUN_ENV) bin/gpu_spmv_test bin/spmv.spv
 	@echo ""
@@ -88,6 +92,9 @@ gpu: bin/gpu_spmv_test bin/spmv.spv \
 	@echo ""
 	@echo ">> axpy / jacobi / saxpby"
 	@$(GPU_RUN_ENV) bin/gpu_vec_ops_test
+	@echo ""
+	@echo ">> end-to-end GPU CG"
+	@$(GPU_RUN_ENV) bin/gpu_cg_test
 
 $(LIBRC): $(RC_OBJ)
 	ar rcs $@ $(RC_OBJ)
