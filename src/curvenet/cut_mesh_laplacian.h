@@ -11,10 +11,14 @@
 #include <cstddef>
 #include <vector>
 
+#include <map>
+#include <utility>
+
 #include "cut_mesh.h"
 #include "dense_linalg.h"
 #include "halfedge.h"
 #include "polygon_laplacian.h"
+#include "sparse_linalg.h"
 #include "vec3.h"
 
 namespace curvenet {
@@ -103,6 +107,132 @@ inline std::vector<double> assemble_vt_lh_v(const cut_mesh::CutMesh &m,
 	const std::vector<double> Vt = dense::transpose(nh, nv, V);
 	const std::vector<double> LV = dense::mat_mul(nh, nh, nv, L, V);
 	return dense::mat_mul(nv, nh, nv, Vt, LV);
+}
+
+// ============================================================
+// Sparse equivalents for the perf-critical path.
+// ============================================================
+//
+// `assemble_lh` builds Lₕ as a dense `nh × nh` matrix that's mostly
+// zero — for triangle inputs each row has at most ~3 nonzeros from the
+// per-face contribution. Storing it as CSR pulls the assembly memory
+// from O(nh²) to O(nnz(Lₕ)) ≈ O(nh) and unlocks O(nnz)-per-iter
+// `spmv` for the per-frame solve.
+
+// Build Lₕ in CSR. Same per-cut-face polygon-Laplacian sum as
+// `assemble_lh`, but the sum is accumulated into a (row, col) → value
+// map and converted to CSR at the end. Output rows = cols = nh.
+inline sparse::SparseMatrixCSR assemble_lh_csr(const cut_mesh::CutMesh &m,
+                                                  const std::vector<Vec3> &positions) {
+	const std::size_t nh = m.he_count();
+	std::map<std::pair<int, int>, double> coo;
+	for (std::size_t f = 0; f < m.base.face_count; ++f) {
+		const std::vector<std::size_t> halfedges = face_loop(m, f);
+		const std::vector<Vec3> poly = face_polygon(m, positions, f);
+		const std::size_t nf = poly.size();
+		if (nf < 3) {
+			continue;
+		}
+		const std::vector<double> Lf = polygon_laplacian::polygon_cot_laplacian(poly);
+		for (std::size_t li = 0; li < nf; ++li) {
+			for (std::size_t lj = 0; lj < nf; ++lj) {
+				const int gi = static_cast<int>(halfedges[li]);
+				const int gj = static_cast<int>(halfedges[lj]);
+				const double v = polygon_laplacian::get_at(Lf, nf, li, lj);
+				if (v != 0.0) {
+					coo[{ gi, gj }] += v;
+				}
+			}
+		}
+	}
+	sparse::SparseMatrixCSR out;
+	out.rows = nh;
+	out.cols = nh;
+	out.row_ptr.assign(nh + 1, 0);
+	for (auto &kv : coo) {
+		++out.row_ptr[static_cast<std::size_t>(kv.first.first) + 1];
+	}
+	for (std::size_t i = 0; i < nh; ++i) {
+		out.row_ptr[i + 1] += out.row_ptr[i];
+	}
+	out.col_idx.resize(coo.size());
+	out.values.resize(coo.size());
+	std::vector<int> cursor = out.row_ptr;
+	for (auto &kv : coo) {
+		const int row = kv.first.first;
+		const int idx = cursor[row]++;
+		out.col_idx[idx] = kv.first.second;
+		out.values[idx]  = kv.second;
+	}
+	return out;
+}
+
+// Build the shared LHS Vᵀ·Lₕ·V directly in CSR. Each per-face
+// polygon-Laplacian contribution L_f[li, lj] is added to the LHS at
+// `(target(li), target(lj))` *only* when both targets are mesh-vertices
+// (sample-promoted vertices contribute to the C operator instead and
+// produce zero rows in the dense LHS — here those rows are simply
+// absent from the CSR, which the caller handles by overlaying sample
+// positions on the deformed-vertex output).
+//
+// The CSR is `nv × nv` (full vertex space) with the promoted-vertex
+// rows empty. Diagonal entries always exist (zero-valued for promoted
+// rows) so `sparse::cg`'s Jacobi preconditioner doesn't divide by
+// missing values.
+inline sparse::SparseMatrixCSR assemble_vt_lh_v_csr(const cut_mesh::CutMesh &m,
+                                                       const std::vector<Vec3> &positions) {
+	const std::size_t nv = m.vertex_count();
+	std::map<std::pair<int, int>, double> coo;
+	for (std::size_t f = 0; f < m.base.face_count; ++f) {
+		const std::vector<std::size_t> halfedges = face_loop(m, f);
+		const std::vector<Vec3> poly = face_polygon(m, positions, f);
+		const std::size_t nf = poly.size();
+		if (nf < 3) {
+			continue;
+		}
+		const std::vector<double> Lf = polygon_laplacian::polygon_cot_laplacian(poly);
+		for (std::size_t li = 0; li < nf; ++li) {
+			const int va = cut_mesh::v_column_of(m, halfedges[li]);
+			if (va < 0) {
+				continue;
+			}
+			for (std::size_t lj = 0; lj < nf; ++lj) {
+				const int vb = cut_mesh::v_column_of(m, halfedges[lj]);
+				if (vb < 0) {
+					continue;
+				}
+				const double v = polygon_laplacian::get_at(Lf, nf, li, lj);
+				if (v != 0.0) {
+					coo[{ va, vb }] += v;
+				}
+			}
+		}
+	}
+	// Make sure every diagonal entry exists so the Jacobi preconditioner
+	// can read it (zero-valued rows for promoted vertices stay zero).
+	for (std::size_t i = 0; i < nv; ++i) {
+		coo.insert({ { static_cast<int>(i), static_cast<int>(i) }, 0.0 });
+	}
+	sparse::SparseMatrixCSR out;
+	out.rows = nv;
+	out.cols = nv;
+	out.row_ptr.assign(nv + 1, 0);
+	for (auto &kv : coo) {
+		++out.row_ptr[static_cast<std::size_t>(kv.first.first) + 1];
+	}
+	for (std::size_t i = 0; i < nv; ++i) {
+		out.row_ptr[i + 1] += out.row_ptr[i];
+	}
+	out.col_idx.resize(coo.size());
+	out.values.resize(coo.size());
+	std::vector<int> cursor = out.row_ptr;
+	for (auto &kv : coo) {
+		const int row = kv.first.first;
+		const int idx = cursor[row]++;
+		out.col_idx[idx] = kv.first.second;
+		out.values[idx]  = kv.second;
+	}
+	return out;
 }
 
 } // namespace cut_mesh_laplacian

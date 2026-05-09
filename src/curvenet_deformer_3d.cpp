@@ -5,11 +5,11 @@
 #include "curvenet/curvenet_builder.h"
 #include "curvenet/cut_mesh.h"
 #include "curvenet/cut_mesh_laplacian.h"
-#include "curvenet/dense_linalg.h"
 #include "curvenet/deform_solve.h"
 #include "curvenet/halfedge.h"
 #include "curvenet/halfedge_builder.h"
 #include "curvenet/harmonic_solve.h"
+#include "curvenet/sparse_linalg.h"
 #include "curvenet/surface_projection.h"
 #include "curvenet/vec3.h"
 
@@ -61,12 +61,8 @@ void CurveNetDeformer3D::invalidate_cache() {
 	rest_cache.cut_mesh = curvenet::cut_mesh::CutMesh{};
 	rest_cache.col_rest_pos.clear();
 	rest_cache.col_input_handle.clear();
-	rest_cache.Lh.clear();
-	rest_cache.V.clear();
-	rest_cache.Vt.clear();
-	rest_cache.LhS.clear();
-	rest_cache.LhsM.clear();
-	rest_cache.lhs_factor = curvenet::dense::LUFactor{};
+	rest_cache.Lh_csr   = curvenet::sparse::SparseMatrixCSR{};
+	rest_cache.LhsM_csr = curvenet::sparse::SparseMatrixCSR{};
 	rest_cache.nc = 0;
 	rest_cache.source_hash = 0;
 }
@@ -242,23 +238,14 @@ void CurveNetDeformer3D::apply_deformation() {
 			col_set[col] = true;
 		}
 
-		// Pre-assemble the rest-pose matrices that the per-frame solve
-		// reuses unchanged. Each one depends only on positions + cut-mesh
-		// topology, so this work moves out of the hot loop.
-		rest_cache.Lh   = curvenet::cut_mesh_laplacian::assemble_lh(
-			rest_cache.cut_mesh, rest_cache.positions);
-		rest_cache.V    = curvenet::cut_mesh_laplacian::assemble_v(rest_cache.cut_mesh);
-		const std::size_t nh_assembled = rest_cache.cut_mesh.he_count();
-		const std::size_t nv_assembled = rest_cache.cut_mesh.vertex_count();
-		rest_cache.Vt   = curvenet::dense::transpose(nh_assembled, nv_assembled, rest_cache.V);
-		rest_cache.LhS  = curvenet::dense::mat_mul(nh_assembled, nh_assembled, nv_assembled,
-			rest_cache.Lh, rest_cache.V);
-		rest_cache.LhsM = curvenet::dense::mat_mul(nv_assembled, nh_assembled, nv_assembled,
-			rest_cache.Vt, rest_cache.LhS);
-		// Factor LhsM once now so per-frame solves are O(nv²) back-subs
-		// instead of repeating Gaussian elim from scratch per RHS column.
-		rest_cache.lhs_factor =
-			curvenet::dense::factorize_lu(nv_assembled, rest_cache.LhsM);
+		// Sparse rest-pose matrices: O(nh) memory + O(nh) bind work
+		// instead of the dense O(nh²) explosion (see docs/PERF_BASELINE.md).
+		rest_cache.Lh_csr =
+			curvenet::cut_mesh_laplacian::assemble_lh_csr(
+				rest_cache.cut_mesh, rest_cache.positions);
+		rest_cache.LhsM_csr =
+			curvenet::cut_mesh_laplacian::assemble_vt_lh_v_csr(
+				rest_cache.cut_mesh, rest_cache.positions);
 
 		rest_cache.source_hash = hash_val;
 		rest_cache.valid = true;
@@ -359,21 +346,55 @@ void CurveNetDeformer3D::apply_deformation() {
 		return curve_id;
 	};
 
+	// Helper that applies Vᵀ implicitly: scatter per-halfedge values
+	// onto the target mesh-vertex (skip sample-promoted halfedges).
+	auto apply_vt = [&](const std::vector<double> &Y_he, std::size_t k) {
+		std::vector<double> out(nv * k, 0.0);
+		for (std::size_t h = 0; h < nh; ++h) {
+			const int col = curvenet::cut_mesh::v_column_of(rest_cache.cut_mesh, h);
+			if (col < 0) {
+				continue;
+			}
+			for (std::size_t c = 0; c < k; ++c) {
+				out[static_cast<std::size_t>(col) * k + c] += Y_he[h * k + c];
+			}
+		}
+		return out;
+	};
+
+	// Multi-RHS sparse CG (one column at a time, sharing the cached
+	// CSR matrix + diagonal preconditioner across columns).
+	const std::size_t cg_max_iter = std::max<std::size_t>(50, nv * 2);
+	auto cg_multi = [&](std::size_t k, const std::vector<double> &rhs) {
+		std::vector<double> X(nv * k, 0.0);
+		std::vector<double> b_col(nv, 0.0);
+		for (std::size_t c = 0; c < k; ++c) {
+			for (std::size_t i = 0; i < nv; ++i) {
+				b_col[i] = rhs[i * k + c];
+			}
+			const std::vector<double> x_col =
+				curvenet::sparse::cg(rest_cache.LhsM_csr, b_col,
+				                       cg_max_iter, 1e-8);
+			for (std::size_t i = 0; i < nv; ++i) {
+				X[i * k + c] = x_col[i];
+			}
+		}
+		return X;
+	};
+
 	// Stage 1 (Eq. 6a): solve for Fv (per-vertex deformation gradients,
-	// 9 columns). Reuses cached Lh, V, Vt, LhsM.
+	// 9 columns). Reuses cached Lh_csr, LhsM_csr.
 	const std::vector<double> CFc =
 		curvenet::harmonic_solve::compute_c_fc_matrix(
 			rest_cache.cut_mesh, sample_col, Fc, 9);
 	const std::vector<double> Lh_CFc =
-		curvenet::dense::mat_mul(nh, nh, 9, rest_cache.Lh, CFc);
-	const std::vector<double> Vt_Lh_CFc =
-		curvenet::dense::mat_mul(nv, nh, 9, rest_cache.Vt, Lh_CFc);
+		curvenet::sparse::spmv_multi(rest_cache.Lh_csr, CFc, 9);
+	const std::vector<double> Vt_Lh_CFc = apply_vt(Lh_CFc, 9);
 	std::vector<double> rhs_a(nv * 9, 0.0);
 	for (std::size_t i = 0; i < nv * 9; ++i) {
 		rhs_a[i] = -Vt_Lh_CFc[i];
 	}
-	const std::vector<double> Fv =
-		curvenet::dense::solve_multi_with_lu(rest_cache.lhs_factor, 9, rhs_a);
+	const std::vector<double> Fv = cg_multi(9, rhs_a);
 
 	// Bridge (Eq. 3 + per-face average): build F_f and y_h.
 	const std::vector<double> Fh =
@@ -393,15 +414,13 @@ void CurveNetDeformer3D::apply_deformation() {
 		diff[i] = CXc[i] - yh[i];
 	}
 	const std::vector<double> Lh_diff =
-		curvenet::dense::mat_mul(nh, nh, 3, rest_cache.Lh, diff);
-	const std::vector<double> Vt_Lh_diff =
-		curvenet::dense::mat_mul(nv, nh, 3, rest_cache.Vt, Lh_diff);
+		curvenet::sparse::spmv_multi(rest_cache.Lh_csr, diff, 3);
+	const std::vector<double> Vt_Lh_diff = apply_vt(Lh_diff, 3);
 	std::vector<double> rhs_b(nv * 3, 0.0);
 	for (std::size_t i = 0; i < nv * 3; ++i) {
 		rhs_b[i] = -Vt_Lh_diff[i];
 	}
-	const std::vector<double> Xv =
-		curvenet::dense::solve_multi_with_lu(rest_cache.lhs_factor, 3, rhs_b);
+	const std::vector<double> Xv = cg_multi(3, rhs_b);
 
 	// Emit the deformed mesh — bypassing SurfaceTool's generate_normals
 	// vertex splits keeps the original vertex count and preserves index

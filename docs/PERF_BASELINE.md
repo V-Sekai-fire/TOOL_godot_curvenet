@@ -1,7 +1,6 @@
 # DeGoes22 deformer — performance baseline
 
-Wall-clock numbers for the **dense LU factor-once** path in
-`src/curvenet/dense_linalg.h` driven by the per-frame solve in
+Wall-clock numbers for both solver paths under
 `src/curvenet_deformer_3d.cpp::apply_deformation`. Run via:
 
 ```sh
@@ -9,76 +8,96 @@ make -C tests bench    # builds tests/bench_deform.cpp at -O3 + runs it
 ```
 
 The benchmark builds an N×N triangulated unit-plane grid, promotes the
-four corner vertices to curvenet samples, factorises `VᵀLₕV` once, and
-times 30 frames of the §4.3 two-stage solve with identity `Fc` and a
-slowly-drifting `Xc` per frame.
+four corner vertices to curvenet samples, and times 30 frames of the
+§4.3 two-stage solve with identity `Fc` and a slowly-drifting `Xc` per
+frame. Two paths are timed: a dense LU factor-once path, and a sparse
+CSR `Lₕ` path with Jacobi-preconditioned conjugate gradient. The
+runtime uses the sparse path; the dense path is kept for regression
+checking.
 
-## Baseline numbers (Apple Silicon M-series, dense path)
+## Dense path
 
 | N×N  | `nv`  | `nh`  | bind (ms) | frame avg (ms) | frames/s |
 |------|-------|-------|-----------|----------------|----------|
-|  10² |   100 |   522 |        57 |           4.28 |    234   |
-|  15² |   225 |  1232 |       449 |          24.50 |     41   |
-|  20² |   400 |  2242 |      2740 |          83.73 |     12   |
-|  25² |   625 |  3552 |     11345 |         213.80 |      5   |
-|  30² |   900 |  5162 |     37176 |         452.51 |      2   |
+|  10² |   100 |   522 |        41 |           4.35 |    230   |
+|  15² |   225 |  1232 |       466 |          25.54 |     39   |
+|  20² |   400 |  2242 |      2797 |          87.44 |     11   |
+|  25² |   625 |  3552 |     11962 |         215.98 |      5   |
+|  30² |   900 |  5162 |     38579 |         458.06 |      2   |
 
-Both the bind and per-frame columns scale cubically with `nv`: each
-doubling of vertex count multiplies the cost by roughly 8–9×. The bind
-cost is dominated by `mat_mul` on the dense Lₕ (`nh × nh`), which goes
-to ~30 GB at N×N = 30² and is the reason the bench caps at 900 verts —
-larger grids exhaust memory before reporting a number.
+Both columns scale cubically with `nv`. The bind cost is dominated by
+`mat_mul` on the dense `nh × nh` Lₕ, which is why the dense table caps
+at 900 verts: larger grids exhaust memory before reporting a number.
+
+## Sparse path (current runtime)
+
+| N×N  | `nv`   | `nh`   | bind (ms) | frame avg (ms) | frames/s |
+|------|--------|--------|-----------|----------------|----------|
+|  10² |    100 |    522 |       0.3 |           0.12 |   8050   |
+|  15² |    225 |   1232 |       1.0 |           0.49 |   2028   |
+|  20² |    400 |   2242 |       2.5 |           1.25 |    803   |
+|  25² |    625 |   3552 |       5.2 |           2.72 |    368   |
+|  30² |    900 |   5162 |       9.9 |           5.06 |    198   |
+|  40² |   1600 |   9282 |      29.5 |          13.93 |     72   |
+|  50² |   2500 |  14602 |      71.3 |          30.18 |     33   |
+|  70² |   4900 |  28842 |     262.3 |          99.97 |     10   |
+
+At 900 verts the sparse path is ~90× faster per frame than dense. Bind
+memory is `O(nnz(Lₕ))` ≈ `O(nh)`, so the table extends to 4900 verts
+without exhausting memory. CG iteration count grows with `√κ` of the
+LHS; the Jacobi preconditioner is enough at these sizes but will need
+upgrading for the 50K+ character meshes the runtime targets (see
+`todos/08_gpu_compute_solver.md`).
 
 ## What this means for the target platforms
 
-* **Demo (10² grid, 100 verts):** 234 FPS interactive — fits Steam Deck
-  and Quest 3 with margin. The Coons-stub-bug-or-not the demo always
-  ran fine here; this confirms the new pipeline does too.
-* **Small character (~5K verts):** dense bind would need ~10⁶ ms ≈
-  17 minutes, which is unworkable. Dense path is structurally dead at
-  this scale.
-* **Steam Deck / Quest 3 character (≥5K, often 20–50K):** dense path
-  cannot even bind. Sparse `Lₕ` assembly (todos/08 phase 1) and
-  iterative CG are mandatory, and 100K real-time still requires GPU
-  compute (todos/08 phase 7+).
+* Demo (10² grid, 100 verts): 8 kHz on the math, so the per-frame
+  budget is dominated by the SurfaceTool emit on the Godot side.
+* Small character (5K verts, ~70²): ~10 frames/s on the sparse CPU
+  path. Interactive but below 90 Hz.
+* Steam Deck / Quest 3 character (≥5K, often 20–50K): the CPU sparse
+  path needs warm-start CG and a better preconditioner to keep up.
+  100K real-time on these handhelds requires the GPU compute path
+  in `todos/08_gpu_compute_solver.md`.
 
-## Benchmark scope (what's included / excluded)
+## Benchmark scope
 
 Included in the per-frame timing:
+
 * assembling `C·F_c` and `C·X_c` per-halfedge constraint matrices
-* `Lₕ · (C·F_c)` and `Vᵀ · Lₕ · (C·F_c)` dense matmuls (Eq. 6a RHS)
-* `solve_multi_with_lu` against the cached factor (9 columns then 3)
+* `Lₕ · (C·F_c)` and the `Vᵀ·…` aggregation (Eq. 6a RHS)
+* solve against the cached LHS (LU back-sub for dense, CG for sparse,
+  9 columns then 3)
 * the bridge: `compute_fh`, `average_over_faces`, `compute_yh`
 
 Excluded from per-frame:
-* the SurfaceTool / ArrayMesh emit (Godot-side; hard to bench in
+
+* the SurfaceTool / ArrayMesh emit (Godot-side, hard to bench in
   isolation)
 * the curvenet_builder ε-merge and surface_projection (run only at
   bind time in the runtime)
 
 The `bind` column includes everything from `from_triangles` through
-`factorize_lu`. Real apply_deformation also runs the curvenet build +
-sample promotion at bind, which adds a small constant.
+the LHS assembly (and LU factorisation for the dense row). Real
+`apply_deformation` also runs the curvenet build and sample promotion
+at bind, which adds a small constant.
 
-## Comparison points the next perf commits should hit
+## Next perf milestones
 
-After the **sparse `Lₕ` assembly** lands (CSR `Lₕ` instead of dense
-`nh × nh`), the bind memory drops from `O(nh²)` to `O(nnz(Lₕ)) ≈ O(nh)`
-and the bind time becomes linear. Expected:
-
-| N×N  | `nv`  | bind (ms) target | frame (ms) target |
-|------|-------|------------------|-------------------|
-|  30² |   900 |             ~50  |              ~50  |
-|  70² |  4900 |            ~300  |             ~300  |
-| 100² | 10000 |            ~600  |             ~600  |
-
-After **GPU compute CG** (todos/08), 90 FPS at 100K vertices on
-Steam Deck and Quest 3. Frame target: ≤ 5 ms.
+1. Warm-start CG. Cache the previous frame's `Xv` and `Fv` as the
+   initial guess; on smooth interactive drags this should reduce CG
+   iteration count by 4–8×.
+2. Incomplete Cholesky preconditioner on `LhsM_csr` to reduce
+   iteration count further, at the cost of extra bind time.
+3. GPU compute path per `todos/08_gpu_compute_solver.md` for the
+   100K-vertex Steam Deck and Quest 3 target.
 
 ## When to re-run
 
 Re-run `make -C tests bench` after any of:
-* swapping `dense::solve_multi_with_lu` → `sparse::cg`
-* turning `cut_mesh_laplacian::assemble_lh` sparse
-* adding warm-start CG state to RestCache
+
+* changes to `cut_mesh_laplacian::assemble_lh_csr` /
+  `assemble_vt_lh_v_csr`
+* changes to `sparse::cg` (preconditioner, tolerance, warm-start)
+* changes to the per-frame solve in `curvenet_deformer_3d.cpp`
 * the GPU compute path landing

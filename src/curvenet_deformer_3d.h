@@ -6,6 +6,7 @@
 #include "curvenet/cut_mesh.h"
 #include "curvenet/dense_linalg.h"
 #include "curvenet/halfedge.h"
+#include "curvenet/sparse_linalg.h"
 #include "curvenet/vec3.h"
 
 #include <cstdint>
@@ -54,13 +55,11 @@ class CurveNetDeformer3D : public MeshInstance3D {
 		curvenet::cut_mesh::CutMesh           cut_mesh;         // sample-promoted
 		std::vector<curvenet::Vec3>           col_rest_pos;     // rest position per sample column
 		std::vector<std::pair<int, int>>      col_input_handle; // (curve_id, handle_idx) per column
-		// Pre-assembled rest-pose matrices (Phase B perf win #1).
-		std::vector<double>                   Lh;               // nh × nh cut-mesh Laplacian
-		std::vector<double>                   V;                // nh × nv halfedge → mesh-vertex map
-		std::vector<double>                   Vt;               // nv × nh transpose
-		std::vector<double>                   LhS;              // nh × nv cached Lₕ·V
-		std::vector<double>                   LhsM;             // nv × nv shared LHS Vᵀ·Lₕ·V
-		curvenet::dense::LUFactor             lhs_factor;       // factor-once LU of LhsM (perf win #2)
+		// Pre-assembled rest-pose matrices, sparse (CSR). Replaces the
+		// dense `Lh, V, Vt, LhS, LhsM` blob — at character mesh sizes
+		// the dense path is O(nh²) memory and explodes past ~1k verts.
+		curvenet::sparse::SparseMatrixCSR     Lh_csr;           // nh × nh
+		curvenet::sparse::SparseMatrixCSR     LhsM_csr;         // nv × nv  Vᵀ·Lₕ·V
 		int                                   nc          = 0;  // number of sample columns
 		std::uint64_t                         source_hash = 0;
 	};

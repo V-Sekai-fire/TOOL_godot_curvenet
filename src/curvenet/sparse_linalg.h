@@ -44,6 +44,26 @@ inline std::vector<double> spmv(const SparseMatrixCSR &A,
 	return y;
 }
 
+// Multi-RHS sparse mat-vec: Y[i, c] = Σ A[i, j] · X[j, c] for k columns.
+// Out is rows × k row-major. O(nnz(A) · k).
+inline std::vector<double> spmv_multi(const SparseMatrixCSR &A,
+                                        const std::vector<double> &X,
+                                        std::size_t k) {
+	std::vector<double> Y(A.rows * k, 0.0);
+	for (std::size_t i = 0; i < A.rows; ++i) {
+		const int rs = A.row_ptr[i];
+		const int re = A.row_ptr[i + 1];
+		for (int p = rs; p < re; ++p) {
+			const double aij = A.values[p];
+			const std::size_t j = static_cast<std::size_t>(A.col_idx[p]);
+			for (std::size_t c = 0; c < k; ++c) {
+				Y[i * k + c] += aij * X[j * k + c];
+			}
+		}
+	}
+	return Y;
+}
+
 inline double dot(const std::vector<double> &a, const std::vector<double> &b) {
 	double s = 0.0;
 	for (std::size_t i = 0; i < a.size(); ++i) {
