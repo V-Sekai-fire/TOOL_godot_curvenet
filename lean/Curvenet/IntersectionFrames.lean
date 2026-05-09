@@ -113,6 +113,46 @@ def perSideWidths (segs : Array OutgoingSegment) :
     acc := acc.set! i (wPlus, wMinus)
   return acc
 
+/-- 3×3 row-major matrix stored as a 9-element Float array. -/
+abbrev Mat3 := Array Float
+
+/-- DeGoes22 §3 per-side scaled frame
+       B_i S_i = [ t_i · l_i  |  b_i · w_i  |  n_i · h_i ]
+   where
+       b_i = n_i × t_i        (binormal, right-handed)
+       h_i = sqrt(l_i · w_i)  (geometric mean of length and width)
+
+   Columns of the resulting 3×3 are scaled basis vectors; rows are
+   stored consecutively (row-major).
+
+   At rest tangent + identity normal + unit length + unit width, the
+   scaled frame is the identity matrix. -/
+def scaledFrame (t n : Vec3) (l w : Float) : Mat3 :=
+  let binX := n.y * t.z - n.z * t.y
+  let binY := n.z * t.x - n.x * t.z
+  let binZ := n.x * t.y - n.y * t.x
+  let h    := (l * w).sqrt
+  #[ t.x * l, binX * w, n.x * h
+   , t.y * l, binY * w, n.y * h
+   , t.z * l, binZ * w, n.z * h ]
+
+/-- Per-side scaled frames for every outgoing segment of an intersection.
+   Output array element `i` is the pair (B_i^+ · S_i^+, B_i^- · S_i^-). -/
+def perSideScaledFrames (segs : Array OutgoingSegment) :
+    Array (Mat3 × Mat3) := Id.run do
+  let n       := segs.size
+  let normals := perSideNormals segs
+  let widths  := perSideWidths  segs
+  let mut acc : Array (Mat3 × Mat3) :=
+    Array.replicate n (#[], #[])
+  for i in [0:n] do
+    let t := segs[i]!.tangent
+    let l := segs[i]!.length
+    let (np, nm) := normals[i]!
+    let (wp, wm) := widths[i]!
+    acc := acc.set! i (scaledFrame t np l wp, scaledFrame t nm l wm)
+  return acc
+
 end IntersectionFrames
 
 /- ============================================================ -/
@@ -185,6 +225,43 @@ example :
     let widths := perSideWidths anisoPerp
     let (wp0, wm0) := widths[0]!
     ((wp0 - 3.0).abs < 1e-12 ∧ (wm0 - 3.0).abs < 1e-12) := by
+  native_decide
+
+/- ============================================================ -/
+/- Scaled-frame matrix B_i S_i.                                 -/
+/- ============================================================ -/
+
+private def matCloseToIdentity (m : Mat3) (eps : Float) : Bool := Id.run do
+  let id : Mat3 := #[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+  for k in [0:9] do
+    if (m[k]! - id[k]!).abs ≥ eps then return false
+  return true
+
+/-- Identity-like input: t = +x, n = +z, l = w = 1 ⇒ B S = identity. -/
+example :
+    matCloseToIdentity (scaledFrame ⟨1.0, 0.0, 0.0⟩ ⟨0.0, 0.0, 1.0⟩ 1.0 1.0) 1e-12 = true := by
+  native_decide
+
+/-- Anisotropic: l = 2, w = 3 stretches columns 0 and 1 only.
+   B S column 0 = (2, 0, 0), column 1 = (0, 3, 0), column 2 = (0, 0, sqrt(6)). -/
+example :
+    let M := scaledFrame ⟨1.0, 0.0, 0.0⟩ ⟨0.0, 0.0, 1.0⟩ 2.0 3.0
+    let h := (2.0 * 3.0).sqrt
+    -- Row 0: (2, 0, 0). Row 1: (0, 3, 0). Row 2: (0, 0, h).
+    ((M[0]! - 2.0).abs < 1e-12 ∧ M[1]!.abs < 1e-12 ∧ M[2]!.abs < 1e-12 ∧
+     M[3]!.abs < 1e-12 ∧ (M[4]! - 3.0).abs < 1e-12 ∧ M[5]!.abs < 1e-12 ∧
+     M[6]!.abs < 1e-12 ∧ M[7]!.abs < 1e-12 ∧ (M[8]! - h).abs < 1e-12) := by
+  native_decide
+
+/-- Per-side scaled frames at the perpendicular intersection: segment 0
+   (t = +x, l = 1) with both sides having unit width and ±z normals
+   gives identity-with-z-flip on one side, identity on the other. -/
+example :
+    let frames := perSideScaledFrames perpendicular
+    let (Bp, Bm) := frames[0]!
+    -- Both B^+ and B^- have row 0 column 0 = 1 (t·l), row 2 col 2 = ±1 (n·h).
+    ((Bp[0]! - 1.0).abs < 1e-12 ∧ (Bp[8]! - 1.0).abs < 1e-12 ∧
+     (Bm[0]! - 1.0).abs < 1e-12 ∧ (Bm[8]! + 1.0).abs < 1e-12) := by
   native_decide
 
 end IntersectionFramesExamples
