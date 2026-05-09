@@ -206,6 +206,175 @@ int run_spmv_multi_case(VulkanCompute &vk, SpmvMultiPipeline &pipe,
 
 } // namespace
 
+// Generic dispatch helper: creates buffers from supplied data, allocates
+// a descriptor set from the pool, dispatches, reads back the writeable
+// buffer at the given index.
+struct Op {
+    std::vector<std::uint8_t> uniform;
+    std::vector<std::vector<float>> storage;   // each entry: a flat fp32 buffer
+    std::size_t output_index = 0;              // which `storage` slot is the output
+    std::size_t output_count = 0;              // how many fp32 elements to read back
+};
+
+std::vector<float> dispatch_op(VulkanCompute &vk,
+                                  ComputeKernel &kernel,
+                                  VkDescriptorPool pool,
+                                  std::uint32_t groups_x,
+                                  const Op &op) {
+    Buffer ubuf = make_buffer(vk, op.uniform.size(),
+                                VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+    std::memcpy(ubuf.mapped, op.uniform.data(), op.uniform.size());
+
+    std::vector<Buffer> sbufs;
+    sbufs.reserve(op.storage.size());
+    for (const auto &s : op.storage) {
+        Buffer b = make_buffer(vk, s.size() * sizeof(float),
+                                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        if (!s.empty()) std::memcpy(b.mapped, s.data(), s.size() * sizeof(float));
+        sbufs.push_back(b);
+    }
+
+    VkDescriptorSet ds = alloc_and_bind(vk.device, pool, kernel.dsl, ubuf, sbufs);
+    run_compute_once(vk, kernel.pipeline, kernel.layout, ds, groups_x);
+
+    std::vector<float> out(op.output_count);
+    std::memcpy(out.data(), sbufs[op.output_index].mapped,
+                  op.output_count * sizeof(float));
+
+    for (auto &b : sbufs) destroy_buffer(vk.device, b);
+    destroy_buffer(vk.device, ubuf);
+    return out;
+}
+
+bool close_with_floor(const std::vector<double> &cpu, const std::vector<double> &gpu,
+                        double abs_tol, double rel_tol, double *worst_rel_out) {
+    if (cpu.size() != gpu.size()) return false;
+    double w = 0.0;
+    bool ok = true;
+    for (std::size_t i = 0; i < cpu.size(); ++i) {
+        const double d = std::fabs(cpu[i] - gpu[i]);
+        const double m = std::fabs(cpu[i]) + std::fabs(gpu[i]) + 1e-30;
+        const double r = d / m;
+        if (r > w) w = r;
+        if (d > abs_tol + rel_tol * m) ok = false;
+    }
+    if (worst_rel_out) *worst_rel_out = w;
+    return ok;
+}
+
+int run_axpy_multi(VulkanCompute &vk, ComputeKernel &kernel, VkDescriptorPool pool) {
+    const std::uint32_t n = 50;
+    const std::uint32_t k = 9;
+    std::mt19937_64 rng(0x1234ULL);
+    std::uniform_real_distribution<double> d(-1.0, 1.0);
+    std::vector<float> alpha(k);
+    for (auto &v : alpha) v = static_cast<float>(d(rng));
+    std::vector<float> x(n * k), y(n * k);
+    for (auto &v : x) v = static_cast<float>(d(rng));
+    for (auto &v : y) v = static_cast<float>(d(rng));
+
+    // Reference (CPU): y[i,c] = fma(alpha[c], x[i,c], y[i,c]) in fp32.
+    std::vector<double> y_ref(n * k);
+    for (std::uint32_t i = 0; i < n; ++i) {
+        for (std::uint32_t c = 0; c < k; ++c) {
+            const std::size_t idx = i * k + c;
+            y_ref[idx] = static_cast<double>(std::fma(alpha[c], x[idx], y[idx]));
+        }
+    }
+
+    Op op;
+    op.uniform.resize(8);
+    std::memcpy(op.uniform.data() + 0, &n, 4);
+    std::memcpy(op.uniform.data() + 4, &k, 4);
+    op.storage = { alpha, x, y };
+    op.output_index = 2;  // Y is the output (in-place)
+    op.output_count = n * k;
+    const std::vector<float> y_gpu = dispatch_op(vk, kernel, pool, (n * k + 63) / 64, op);
+
+    std::vector<double> y_gpu_d(y_gpu.begin(), y_gpu.end());
+    double worst = 0.0;
+    const bool ok = close_with_floor(y_ref, y_gpu_d, 1e-5, 1e-5, &worst);
+    std::printf("  axpy_multi   n=%-3u k=%-2u  worst_rel=%.3e  %s\n",
+                  n, k, worst, ok ? "OK" : "FAIL");
+    return ok ? 0 : 1;
+}
+
+int run_jacobi_multi(VulkanCompute &vk, ComputeKernel &kernel, VkDescriptorPool pool) {
+    const std::uint32_t n = 50;
+    const std::uint32_t k = 9;
+    std::mt19937_64 rng(0x5678ULL);
+    std::uniform_real_distribution<double> dd(0.5, 2.0);
+    std::uniform_real_distribution<double> bd(-1.0, 1.0);
+    std::vector<float> dvec(n);
+    for (auto &v : dvec) v = static_cast<float>(dd(rng));
+    // Sprinkle a few zero diagonals to test the zero-skip path.
+    dvec[3]  = 0.0f;
+    dvec[20] = 0.0f;
+    std::vector<float> b(n * k);
+    for (auto &v : b) v = static_cast<float>(bd(rng));
+
+    std::vector<double> y_ref(n * k);
+    for (std::uint32_t i = 0; i < n; ++i) {
+        for (std::uint32_t c = 0; c < k; ++c) {
+            const std::size_t idx = i * k + c;
+            y_ref[idx] = (dvec[i] == 0.0f) ? 0.0
+                                              : static_cast<double>(b[idx] / dvec[i]);
+        }
+    }
+
+    Op op;
+    op.uniform.resize(8);
+    std::memcpy(op.uniform.data() + 0, &n, 4);
+    std::memcpy(op.uniform.data() + 4, &k, 4);
+    op.storage = { dvec, b, std::vector<float>(n * k, 0.0f) };
+    op.output_index = 2;
+    op.output_count = n * k;
+    const std::vector<float> y_gpu = dispatch_op(vk, kernel, pool, (n * k + 63) / 64, op);
+    std::vector<double> y_gpu_d(y_gpu.begin(), y_gpu.end());
+    double worst = 0.0;
+    const bool ok = close_with_floor(y_ref, y_gpu_d, 1e-5, 1e-5, &worst);
+    std::printf("  jacobi_multi n=%-3u k=%-2u  worst_rel=%.3e  %s\n",
+                  n, k, worst, ok ? "OK" : "FAIL");
+    return ok ? 0 : 1;
+}
+
+int run_saxpby_multi(VulkanCompute &vk, ComputeKernel &kernel, VkDescriptorPool pool) {
+    const std::uint32_t n = 50;
+    const std::uint32_t k = 12;
+    std::mt19937_64 rng(0x9abcULL);
+    std::uniform_real_distribution<double> d(-1.0, 1.0);
+    std::vector<float> alpha(k), beta(k);
+    for (auto &v : alpha) v = static_cast<float>(d(rng));
+    for (auto &v : beta)  v = static_cast<float>(d(rng));
+    std::vector<float> x(n * k), y(n * k);
+    for (auto &v : x) v = static_cast<float>(d(rng));
+    for (auto &v : y) v = static_cast<float>(d(rng));
+
+    std::vector<double> out_ref(n * k);
+    for (std::uint32_t i = 0; i < n; ++i) {
+        for (std::uint32_t c = 0; c < k; ++c) {
+            const std::size_t idx = i * k + c;
+            out_ref[idx] = static_cast<double>(
+                std::fma(alpha[c], x[idx], beta[c] * y[idx]));
+        }
+    }
+
+    Op op;
+    op.uniform.resize(8);
+    std::memcpy(op.uniform.data() + 0, &n, 4);
+    std::memcpy(op.uniform.data() + 4, &k, 4);
+    op.storage = { alpha, beta, x, y, std::vector<float>(n * k, 0.0f) };
+    op.output_index = 4;
+    op.output_count = n * k;
+    const std::vector<float> out_gpu = dispatch_op(vk, kernel, pool, (n * k + 63) / 64, op);
+    std::vector<double> out_gpu_d(out_gpu.begin(), out_gpu.end());
+    double worst = 0.0;
+    const bool ok = close_with_floor(out_ref, out_gpu_d, 1e-5, 1e-5, &worst);
+    std::printf("  saxpby_multi n=%-3u k=%-2u  worst_rel=%.3e  %s\n",
+                  n, k, worst, ok ? "OK" : "FAIL");
+    return ok ? 0 : 1;
+}
+
 int main(int argc, char **argv) {
     (void)argc; (void)argv;
     VulkanCompute vk;
@@ -214,15 +383,24 @@ int main(int argc, char **argv) {
     SpmvMultiPipeline pipe;
     pipe.init(vk.device, load_spv("bin/spmv_multi.spv"));
 
+    ComputeKernel k_axpy_multi;
+    k_axpy_multi.init(vk.device, load_spv("bin/axpy_multi.spv"), 3);
+
+    ComputeKernel k_jacobi_multi;
+    k_jacobi_multi.init(vk.device, load_spv("bin/jacobi_multi.spv"), 3);
+
+    ComputeKernel k_saxpby_multi;
+    k_saxpby_multi.init(vk.device, load_spv("bin/saxpby_multi.spv"), 5);
+
     VkDescriptorPoolSize sizes[2]{};
     sizes[0].type            = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    sizes[0].descriptorCount = 8;
+    sizes[0].descriptorCount = 16;
     sizes[1].type            = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    sizes[1].descriptorCount = 40;
+    sizes[1].descriptorCount = 80;
     VkDescriptorPoolCreateInfo dpci{};
     dpci.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     dpci.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    dpci.maxSets       = 8;
+    dpci.maxSets       = 16;
     dpci.poolSizeCount = 2;
     dpci.pPoolSizes    = sizes;
     VkDescriptorPool pool = VK_NULL_HANDLE;
@@ -275,7 +453,14 @@ int main(int argc, char **argv) {
         failures += run_spmv_multi_case(vk, pipe, pool, "grid_lap(7) k=1", A, X, 1);
     }
 
+    failures += run_axpy_multi  (vk, k_axpy_multi,   pool);
+    failures += run_jacobi_multi(vk, k_jacobi_multi, pool);
+    failures += run_saxpby_multi(vk, k_saxpby_multi, pool);
+
     vkDestroyDescriptorPool(vk.device, pool, nullptr);
+    k_saxpby_multi.shutdown(vk.device);
+    k_jacobi_multi.shutdown(vk.device);
+    k_axpy_multi  .shutdown(vk.device);
     pipe.shutdown(vk.device);
     vk.shutdown();
     std::printf("\n%s: %d failing case(s)\n", failures == 0 ? "PASS" : "FAIL", failures);

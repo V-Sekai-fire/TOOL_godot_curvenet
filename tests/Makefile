@@ -93,7 +93,8 @@ gpu: bin/gpu_spmv_test bin/spmv.spv \
      bin/gpu_dot_test bin/dot_reduce.spv \
      bin/gpu_vec_ops_test bin/axpy.spv bin/jacobi.spv bin/saxpby.spv \
      bin/gpu_cg_test \
-     bin/gpu_multi_rhs_test bin/spmv_multi.spv
+     bin/gpu_multi_rhs_test bin/spmv_multi.spv \
+     bin/axpy_multi.spv bin/jacobi_multi.spv bin/saxpby_multi.spv
 	@echo ">> spmv"
 	@$(GPU_RUN_ENV) bin/gpu_spmv_test bin/spmv.spv
 	@echo ""
