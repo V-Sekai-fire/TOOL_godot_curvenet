@@ -245,6 +245,12 @@ bin/diag_meshlet_pcg_chol_70k: diag_meshlet_pcg_chol_70k.cpp mire_body_70k_data.
 diag_meshlet_pcg_chol_70k: bin/diag_meshlet_pcg_chol_70k
 	@bin/diag_meshlet_pcg_chol_70k
 
+bin/diag_meshlet_local_cg: diag_meshlet_local_cg.cpp mire_body_70k_data.h $(MESHOPT_OBJ) | bin
+	$(CXX) $(BENCH_CXXFLAGS) -I$(MESHOPT_DIR)/src -o $@ $< $(MESHOPT_OBJ)
+
+diag_meshlet_local_cg: bin/diag_meshlet_local_cg
+	@bin/diag_meshlet_local_cg
+
 clean:
 	rm -rf bin $(LIBRC)
 	find $(RC)/src -name "*.o" -delete
