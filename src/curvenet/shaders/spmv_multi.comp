@@ -1,0 +1,53 @@
+// Multi-RHS sparse matrix-vector product: Y = A · X where X and Y
+// are nv × k row-major matrices. One workgroup of 64 threads strides
+// over rows; each thread loops over its row's nonzeros once and
+// accumulates into a length-k local register array. The same A row
+// is read *once* per (i) for k different output columns, so per-row
+// memory traffic on A is shared across columns — the main win when
+// k > 1 over k separate spmv calls.
+//
+// Buffer layout (set 0):
+//   binding 0  uniform  Params { uint rows; uint k; }
+//   binding 1  storage  RowPtr { int   row_ptr[]; }
+//   binding 2  storage  ColIdx { int   col_idx[]; }
+//   binding 3  storage  Values { float values[]; }
+//   binding 4  storage  X      { float x[]; }     // length nv * k
+//   binding 5  storage  Y      { float y[]; }     // length nv * k
+//
+// k is bounded by K_MAX (compile-time) so the local accumulator
+// fits in a fixed register array. For our use (deformer 9-col Fv
+// solve, 3-col Xv solve), K_MAX = 16 is comfortable.
+#version 450
+#define K_MAX 16
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform Params {
+    uint rows;
+    uint k;
+};
+
+layout(set = 0, binding = 1) readonly  buffer RowPtr { int   row_ptr[]; };
+layout(set = 0, binding = 2) readonly  buffer ColIdx { int   col_idx[]; };
+layout(set = 0, binding = 3) readonly  buffer Values { float values[]; };
+layout(set = 0, binding = 4) readonly  buffer X      { float x[];       };
+layout(set = 0, binding = 5) writeonly buffer Y      { float y[];       };
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= rows) return;
+    int rs = row_ptr[i];
+    int re = row_ptr[i + 1];
+
+    float acc[K_MAX];
+    for (uint c = 0; c < k; ++c) acc[c] = 0.0;
+
+    for (int p = rs; p < re; ++p) {
+        float aij = values[p];
+        uint  j   = uint(col_idx[p]);
+        for (uint c = 0; c < k; ++c) {
+            acc[c] = fma(aij, x[j * k + c], acc[c]);
+        }
+    }
+
+    for (uint c = 0; c < k; ++c) y[i * k + c] = acc[c];
+}
