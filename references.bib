@@ -423,3 +423,39 @@
   year    = {1998},
   doi     = {10.1137/S1064827595287997}
 }
+
+% =================================================================
+% Smoother candidates for the wide-diagonal Galerkin stall (loops 8 -
+% 100/2 hit the same residual plateau ~3.7 on the 81k matrix because
+% omega * D^{-1} * r breaks when D spans 7 decades). Lan 2025 JGS2 is
+% the prime candidate per the wanghmin.github.io/publication/ review:
+% second-order Jacobi/Gauss-Seidel that explicitly attacks this
+% failure mode without a hierarchy. Lan 2023 stencil descent is the
+% fallback - per-stencil second-order descent that handles wide
+% eigenvalue spread without a global preconditioner.
+% =================================================================
+
+@article{Lan2025JGS2,
+  author  = {Lan, Lei and Yang, Yin and Kim, Tongyun and Liu, Hao and
+             Chen, Wei and Li, Minchen},
+  title   = {{JGS2}: Near Second-order Converging {Jacobi}/{Gauss}-{Seidel}
+             for {GPU} Elastodynamics},
+  journal = {ACM Transactions on Graphics (SIGGRAPH)},
+  volume  = {44},
+  number  = {4},
+  year    = {2025},
+  doi     = {10.1145/3731179}
+}
+
+@article{Lan2023StencilDescent,
+  author  = {Lan, Lei and Luo, Ran and Fratarcangeli, Marco and
+             Xu, Weiwei and Wang, Huamin and Guo, Xiaohu and
+             Yin, Junfeng and Yang, Yin},
+  title   = {Second-Order Stencil Descent for Interior-Point
+             Hyperelasticity},
+  journal = {ACM Transactions on Graphics (SIGGRAPH)},
+  volume  = {42},
+  number  = {4},
+  year    = {2023},
+  doi     = {10.1145/3592104}
+}

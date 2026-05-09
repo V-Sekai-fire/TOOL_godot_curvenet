@@ -203,6 +203,64 @@ body that's 2.1e-7. The cot Laplacian on the resulting mesh has
 finite entries (off-diag dynamic range 10¹¹ vs `±∞` before) and CG
 converges.
 
+## Dead ends (loops 8 → 100/1 → 100/2)
+
+Three rounds of preconditioner work all hit the same plateau at
+L_inf residual ~3.7 on the 81k Mire cut-mesh Laplacian. Files
+remain in tree with TOMBSTONE headers:
+
+| Loop      | Hypothesis                                     | Verdict                                          | Tombstoned files |
+|-----------|-------------------------------------------------|---------------------------------------------------|------------------|
+| 8         | Recursive multilevel beats 2-level on 81k      | False — 5-level stalls at 3.7                     | `multi_level_schwarz.{h,lean}` |
+| 100/1     | HEM connectivity-aware coarsening helps        | False — 7-level HEM stalls at 3.7                 | `heavy_edge_matching.{h,lean}` |
+| 100/2     | 1D constant null-space drift is the cause      | False — `max│row_sum│` = 1.16e-10 already         | `kernel_projection.{h,lean}` |
+
+The smoking-gun diagnostic is `tests/diag_70k_cg_baseline.cpp`.
+Plain unpreconditioned CG on the 81k matrix converges to ‖r‖² =
+3.6e-10 in 200,000 iters (133 s). Every preconditioner above is
+**worse than no preconditioner**. The actual cause is in the
+matrix itself:
+
+  diag range = [8.2e-2, 1.1e+6]   (7 orders of magnitude)
+
+Galerkin coarsening inherits this range. The Jacobi smoother
+`omega · D^{-1} · r` is useless when D spans 7 decades — small-D
+rows are over-relaxed, large-D rows are under-relaxed. Plain CG's
+implicit per-iter scaling at least homogenizes; discrete Jacobi
+sweeps don't.
+
+The `two_level_schwarz` and `chebyshev_accel` modules also carry
+TOMBSTONE headers — they pass their unit tests and converged at
+5k, but every 81k variant of either stalls at the same plateau.
+
+Don't reuse any of these on a real mesh until the smoother is
+swapped for one robust to wide diagonal ranges (sym-GS, or
+D^{-1/2}·A·D^{-1/2} symmetric scaling per level), and that
+smoother is verified in isolation on the 81k matrix first.
+
+The reproducer for the stall is `tests/diag_multi_level_schwarz_70k`.
+The earlier 70k Chebyshev and 2-level Schwarz diags were removed
+as redundant.
+
+### Live candidate
+
+Per a review of the Wang Huamin lab publication list, the most
+direct drop-in fix is **Lan 2025 JGS2** (`Lan2025JGS2` in
+references.bib): a second-order Jacobi / Gauss-Seidel that
+explicitly attacks the `omega·D^{-1}·r` failure mode on stiff
+systems with wide eigenvalue spread. It's a smoother swap with
+no new hierarchy required — minimal blast radius, large potential
+upside.
+
+Fallback: **Lan 2023 stencil descent** (`Lan2023StencilDescent`)
+for per-stencil second-order descent, useful inside the existing
+Schwarz blocks if JGS2 alone isn't enough.
+
+Test gate before pulling either into the V-cycle: drop the
+smoother into a 1-level diag on the 81k matrix and confirm it
+converges *in isolation*. Only then re-bolt onto the multilevel
+Schwarz infrastructure that's currently tombstoned.
+
 ## Multi-level Schwarz (loop 8 + loop 100)
 
 Generic multilevel V-cycle on top of the meshlet Schwarz smoother.

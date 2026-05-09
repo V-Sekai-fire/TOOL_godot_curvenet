@@ -1,6 +1,16 @@
 // Copyright (c) 2026 K. S. Ernest (iFire) Lee.
 // SPDX-License-Identifier: MIT
 //
+// TOMBSTONE [loop 100/2, 2026-05-09]
+// Does not fix the 81k V-cycle stall; same residual plateau (~3.7)
+// as 1-, 2-, 3-, and 7-level variants. Root cause is the 7-decade
+// diagonal spread, not level count or aggregator. See
+// tests/diag_70k_cg_baseline.cpp and PERF_BASELINE.md "Dead ends".
+// Header is correct + tested; reuse with a smoother robust to
+// wide-range D before re-trying on any large mesh.
+//
+// ----
+//
 // C++ mirror of `lean/Curvenet/MultiLevelSchwarz.lean`. Recursive
 // extension of `two_level_schwarz.h` — instead of one coarse level,
 // stacks several aggregations so the effective coarsening goes from

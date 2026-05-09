@@ -1,6 +1,23 @@
 /-
 MIT License — Copyright (c) 2026 K. S. Ernest (iFire) Lee.
 
+TOMBSTONE [loop 100/2, 2026-05-09]
+
+Does not fix the 81k V-cycle stall. Auto-builds a 7-level
+hierarchy on 81k via meshlet aggregation + iterated HEM, residual
+still plateaus at L_inf ~3.7 — same as 2-level, same as
+1-level Chebyshev-Schwarz. Root cause identified in
+`tests/diag_70k_cg_baseline.cpp`: 7-decade diagonal spread
+[8e-2, 1e+6] makes Jacobi smoothing on intermediate Galerkin
+levels useless. See PERF_BASELINE.md "Dead ends".
+
+Algorithm is correct (native_decide on toy 8→4→2→1 hierarchy);
+kept for reuse with a smoother robust to wide diagonal ranges.
+Do not re-bolt onto Jacobi without first testing the new smoother
+in isolation.
+
+----
+
 Multilevel additive Schwarz — the recursive extension of
 `Curvenet.TwoLevelSchwarz`.
 

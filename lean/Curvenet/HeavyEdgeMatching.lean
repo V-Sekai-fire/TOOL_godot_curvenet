@@ -1,6 +1,21 @@
 /-
 MIT License — Copyright (c) 2026 K. S. Ernest (iFire) Lee.
 
+TOMBSTONE [loop 100/1, 2026-05-09]
+
+Does not fix the 81k V-cycle stall. Connectivity-aware HEM
+aggregation produced the same L_inf residual plateau ~3.7 as
+principal-axis bucketing did. Aggregation quality is not the
+bottleneck; the 7-decade diagonal spread is (see
+`tests/diag_70k_cg_baseline.cpp` and PERF_BASELINE.md
+"Dead ends").
+
+Algorithm is correct (native_decide on path/star/cycle/path-8);
+kept as drop-in coarsener for any future multilevel try with a
+better smoother.
+
+----
+
 Heavy-edge matching aggregation — connectivity-aware coarsening for
 Multi-level Schwarz.
 

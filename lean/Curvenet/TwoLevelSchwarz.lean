@@ -1,6 +1,22 @@
 /-
 MIT License — Copyright (c) 2026 K. S. Ernest (iFire) Lee.
 
+TOMBSTONE [loop 100, 2026-05-09]
+
+5k converges in 193 outer iters (slower than 1-level Chebyshev's
+137). 81k stalls at L_inf residual ~3.7 — the same plateau hit by
+every multilevel variant tried. Root cause is the matrix's
+7-decade diagonal spread, not the level count or aggregator.
+See `tests/diag_70k_cg_baseline.cpp` and PERF_BASELINE.md
+"Dead ends".
+
+Operators are correct (native_decide on 4-vert / 2-meshlet
+instances); the C++ Galerkin ports `restrict_fine`,
+`prolong_coarse`, and `galerkin_csr` are reused by the multilevel
+build as building blocks.
+
+----
+
 Two-level additive Schwarz operators.
 
 The 1-level Schwarz with 1-ring overlap stalls at the deformer's

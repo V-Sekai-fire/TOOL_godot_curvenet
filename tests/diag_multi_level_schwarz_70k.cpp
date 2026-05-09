@@ -1,6 +1,16 @@
 // Copyright (c) 2026 K. S. Ernest (iFire) Lee.
 // SPDX-License-Identifier: MIT
 //
+// TOMBSTONE [loop 100/2, 2026-05-09]
+// 81k stalls at residual ~3.7 with this preconditioner. Plain CG
+// reaches ‖r‖² = 3.6e-10 in the same wall-clock; the V-cycle is
+// worse than no preconditioner. Kept as the consolidated 70k
+// reproducer for the stall (the chebyshev/two-level 70k variants
+// were removed). See diag_70k_cg_baseline.cpp and
+// PERF_BASELINE.md "Dead ends".
+//
+// ----
+//
 // Multi-level Schwarz training run on Mire 81k. Generic in level
 // count: builds a hierarchy by recursive aggregation until the
 // top level fits below a configurable threshold.

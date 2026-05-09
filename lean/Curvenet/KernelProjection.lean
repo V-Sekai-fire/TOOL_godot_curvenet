@@ -1,6 +1,21 @@
 /-
 MIT License — Copyright (c) 2026 K. S. Ernest (iFire) Lee.
 
+TOMBSTONE [loop 100/2, 2026-05-09]
+
+Tested for the wrong reason. Hypothesis was that the 81k V-cycle
+stall was constant null-space contamination; in fact the matrix's
+constant kernel is exact (max |row_sum| = 1.16e-10 in
+`tests/diag_70k_cg_baseline.cpp`) and `b` is in range to ~1e-13.
+Adding zero-mean projection to the V-cycle was harmless on 81k
+(still stalls at 3.7) and harmless on 5k (168 iters preserved).
+
+Algorithm is correct and stays as load-bearing infrastructure for
+any future kernel-aware variant (e.g. coarse-grid pinning). Don't
+expect it to do anything useful on its own.
+
+----
+
 Kernel-mode projection for V-cycle corrections.
 
 Loop-100 diagnosis: at 81k the multilevel V-cycle stalls at

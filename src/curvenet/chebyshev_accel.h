@@ -1,6 +1,15 @@
 // Copyright (c) 2026 K. S. Ernest (iFire) Lee.
 // SPDX-License-Identifier: MIT
 //
+// TOMBSTONE [loop 100, 2026-05-09]
+// 15× speedup at 5k (137 vs ~2100 iters), but no rho in
+// {0.997 … 0.99997} converged on 81k in 800 iters. Same root cause
+// as every other 81k attempt: 7-decade diagonal spread breaks the
+// underlying smoother. See tests/diag_70k_cg_baseline.cpp and
+// PERF_BASELINE.md "Dead ends".
+//
+// ----
+//
 // C++ mirror of `lean/Curvenet/ChebyshevAccel.lean`.
 //
 // Wang 2015's Chebyshev semi-iterative acceleration. Wraps any base

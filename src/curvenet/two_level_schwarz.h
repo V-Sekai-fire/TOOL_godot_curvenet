@@ -1,6 +1,16 @@
 // Copyright (c) 2026 K. S. Ernest (iFire) Lee.
 // SPDX-License-Identifier: MIT
 //
+// TOMBSTONE [loop 100, 2026-05-09]
+// 5k converges in 193 iters (slower than 1-level Chebyshev's 137).
+// 81k stalls at L_inf residual ~3.7 — same plateau every multilevel
+// variant hits. Root cause is the matrix's 7-decade diagonal spread,
+// not the level count. See tests/diag_70k_cg_baseline.cpp and
+// PERF_BASELINE.md "Dead ends". The Galerkin / restrict / prolong
+// helpers below are still reused by multi_level_schwarz.h.
+//
+// ----
+//
 // C++ mirror of `lean/Curvenet/TwoLevelSchwarz.lean`.
 //
 // 1-level Schwarz with 1-ring overlap stalls at the deformer's PCVR-

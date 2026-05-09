@@ -257,23 +257,11 @@ bin/diag_meshlet_chebyshev_5k: diag_meshlet_chebyshev_5k.cpp mire_body_data.h $(
 diag_meshlet_chebyshev_5k: bin/diag_meshlet_chebyshev_5k
 	@bin/diag_meshlet_chebyshev_5k
 
-bin/diag_meshlet_chebyshev_70k: diag_meshlet_chebyshev_70k.cpp mire_body_70k_data.h $(MESHOPT_OBJ) | bin
-	$(CXX) $(BENCH_CXXFLAGS) -I$(MESHOPT_DIR)/src -o $@ $< $(MESHOPT_OBJ)
-
-diag_meshlet_chebyshev_70k: bin/diag_meshlet_chebyshev_70k
-	@bin/diag_meshlet_chebyshev_70k
-
 bin/diag_two_level_schwarz_5k: diag_two_level_schwarz_5k.cpp mire_body_data.h $(MESHOPT_OBJ) | bin
 	$(CXX) $(BENCH_CXXFLAGS) -I$(MESHOPT_DIR)/src -o $@ $< $(MESHOPT_OBJ)
 
 diag_two_level_schwarz_5k: bin/diag_two_level_schwarz_5k
 	@bin/diag_two_level_schwarz_5k
-
-bin/diag_two_level_schwarz_70k: diag_two_level_schwarz_70k.cpp mire_body_70k_data.h $(MESHOPT_OBJ) | bin
-	$(CXX) $(BENCH_CXXFLAGS) -I$(MESHOPT_DIR)/src -o $@ $< $(MESHOPT_OBJ)
-
-diag_two_level_schwarz_70k: bin/diag_two_level_schwarz_70k
-	@bin/diag_two_level_schwarz_70k
 
 bin/diag_multi_level_schwarz_5k: diag_multi_level_schwarz_5k.cpp mire_body_data.h $(MESHOPT_OBJ) | bin
 	$(CXX) $(BENCH_CXXFLAGS) -I$(MESHOPT_DIR)/src -o $@ $< $(MESHOPT_OBJ)

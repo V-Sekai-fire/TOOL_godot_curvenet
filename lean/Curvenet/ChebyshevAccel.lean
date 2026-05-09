@@ -1,6 +1,19 @@
 /-
 MIT License — Copyright (c) 2026 K. S. Ernest (iFire) Lee.
 
+TOMBSTONE [loop 100, 2026-05-09]
+
+15× speedup at 5k (137 vs ~2100 iters) but does not fix 81k —
+no tested rho in {0.997 … 0.99997} converged in 800 iters. Same
+root cause as every other 81k attempt: 7-decade diagonal spread
+breaks the underlying smoother. See `tests/diag_70k_cg_baseline.cpp`
+and PERF_BASELINE.md "Dead ends".
+
+Spec is correct (native_decide on the omega recurrence); kept as
+a multiplier for any 81k smoother that does converge on its own.
+
+----
+
 Chebyshev semi-iterative acceleration for the deformer's CG path.
 
 Per the deformer measurements at 81k verts (`docs/PERF_BASELINE.md`),

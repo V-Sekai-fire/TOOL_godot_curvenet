@@ -1,6 +1,15 @@
 // Copyright (c) 2026 K. S. Ernest (iFire) Lee.
 // SPDX-License-Identifier: MIT
 //
+// TOMBSTONE [loop 100/1, 2026-05-09]
+// Does not fix the 81k V-cycle stall. Connectivity-aware HEM
+// produced the same residual plateau (~3.7) as principal-axis
+// bucketing. Aggregation is not the bottleneck. See
+// tests/diag_70k_cg_baseline.cpp and PERF_BASELINE.md "Dead ends".
+// Header is correct + tested; reuse with a different smoother.
+//
+// ----
+//
 // C++ mirror of `lean/Curvenet/HeavyEdgeMatching.lean`.
 //
 // Heavy-edge matching (Karypis-Kumar 1998) — connectivity-aware

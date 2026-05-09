@@ -1,6 +1,17 @@
 // Copyright (c) 2026 K. S. Ernest (iFire) Lee.
 // SPDX-License-Identifier: MIT
 //
+// TOMBSTONE [loop 100/2, 2026-05-09]
+// Tested for the wrong reason. The 81k matrix's constant kernel is
+// already exact (max |row_sum| = 1.16e-10) and `b` lies in range to
+// ~1e-13, so zero-mean projection has nothing to clean up. Adding
+// it to the V-cycle was harmless on both 5k and 81k.
+// See tests/diag_70k_cg_baseline.cpp and PERF_BASELINE.md
+// "Dead ends". Kept as infrastructure; do not expect it to
+// accelerate convergence on its own.
+//
+// ----
+//
 // C++ mirror of `lean/Curvenet/KernelProjection.lean`.
 //
 // Project a vector onto the orthogonal complement of the constant
