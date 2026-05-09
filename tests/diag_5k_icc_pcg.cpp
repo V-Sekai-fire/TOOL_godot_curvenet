@@ -46,7 +46,7 @@ struct PcgStats {
 };
 
 PcgStats cg_icc(const sp::SparseMatrixCSR &A,
-                const icc::IccFactor &fac,
+                const icc::IncompleteCholeskyFactor &fac,
                 const std::vector<double> &b,
                 std::vector<double> &x_out,
                 std::size_t max_iter,
@@ -54,7 +54,7 @@ PcgStats cg_icc(const sp::SparseMatrixCSR &A,
     const std::size_t n = A.rows;
     std::vector<double> x(n, 0.0);
     std::vector<double> r = b;
-    std::vector<double> z = icc::apply(fac, r);
+    std::vector<double> z = icc::apply_minv(fac, r);
     std::vector<double> p = z;
     double rz_old = sp::dot(r, z);
     const double tol_sq = tol * tol;
@@ -72,7 +72,7 @@ PcgStats cg_icc(const sp::SparseMatrixCSR &A,
             std::printf("  iter %6zu  ‖r‖² = %.4e\n", iter, st.final_rr);
         }
         if (st.final_rr < tol_sq) { st.converged = true; break; }
-        z = icc::apply(fac, r);
+        z = icc::apply_minv(fac, r);
         const double rz_new = sp::dot(r, z);
         const double beta = (rz_old == 0.0) ? 0.0 : (rz_new / rz_old);
         p = sp::saxpby(1.0, z, beta, p);
@@ -112,7 +112,7 @@ int main() {
     // Factorise. Retry with progressively larger diagonal shift if
     // the no-fill variant breaks down (Manteuffel 1980 shifted-ICC).
     const double t_fact_start = now_ms();
-    icc::IccFactor fac;
+    icc::IncompleteCholeskyFactor fac;
     double used_shift = 0.0;
     for (double s : { 0.0, 1e-4, 1e-3, 1e-2, 1e-1, 1.0 }) {
         fac = icc::factor(A, s);

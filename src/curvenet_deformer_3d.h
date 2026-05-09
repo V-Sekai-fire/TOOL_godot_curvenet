@@ -6,6 +6,7 @@
 #include "curvenet/cut_mesh.h"
 #include "curvenet/dense_linalg.h"
 #include "curvenet/halfedge.h"
+#include "curvenet/incomplete_cholesky.h"
 #include "curvenet/sparse_linalg.h"
 #include "curvenet/vec3.h"
 
@@ -38,6 +39,12 @@ class CurveNetDeformer3D : public MeshInstance3D {
 	TypedArray<Curve3D> profile_curves;
 	double length_tiebreak = 0.1;
 	bool deformation_active = false;
+	// Incomplete-Cholesky preconditioner opt-in. Off by default;
+	// diagonal-Jacobi remains the production code path. Used by
+	// benchmarks (and eventually the runtime) once it's measured to
+	// be a wall-clock win on the real workload, not just the
+	// synthetic 81k diag.
+	bool use_incomplete_cholesky = false;
 
 	// Cache of the rest-pose pipeline: halfedge mesh + sample-promoted
 	// CutMesh, plus the column ↔ input-handle mapping needed at runtime
@@ -60,6 +67,14 @@ class CurveNetDeformer3D : public MeshInstance3D {
 		// the dense path is O(nh²) memory and explodes past ~1k verts.
 		curvenet::sparse::SparseMatrixCSR     Lh_csr;           // nh × nh
 		curvenet::sparse::SparseMatrixCSR     LhsM_csr;         // nv × nv  Vᵀ·Lₕ·V
+		// Incomplete-Cholesky factor of LhsM_csr — built lazily the
+		// first time `use_incomplete_cholesky` is observed true at
+		// solve time. Skipped when the flag is off, since
+		// factorisation is non-trivial (~28 s at 81k) and we don't
+		// want it to delay bind-time invariably.
+		curvenet::incomplete_cholesky::IncompleteCholeskyFactor incomplete_cholesky_factor;
+		bool                                  incomplete_cholesky_built = false;
+		double                                incomplete_cholesky_shift = 0.0;
 		int                                   nc          = 0;  // number of sample columns
 		std::uint64_t                         source_hash = 0;
 		// Warm-start state: the previous frame's solver iterates,
@@ -91,6 +106,9 @@ public:
 
 	void set_deformation_active(bool p_v);
 	bool is_deformation_active() const;
+
+	void set_use_incomplete_cholesky(bool p_v);
+	bool get_use_incomplete_cholesky() const;
 
 	void _ready() override;
 

@@ -6,6 +6,7 @@
 #include "curvenet/cut_mesh.h"
 #include "curvenet/cut_mesh_laplacian.h"
 #include "curvenet/deform_solve.h"
+#include "curvenet/incomplete_cholesky.h"
 #include "curvenet/halfedge.h"
 #include "curvenet/halfedge_builder.h"
 #include "curvenet/harmonic_solve.h"
@@ -43,6 +44,8 @@ void CurveNetDeformer3D::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_deformation_active", "v"), &CurveNetDeformer3D::set_deformation_active);
 	ClassDB::bind_method(D_METHOD("is_deformation_active"), &CurveNetDeformer3D::is_deformation_active);
+	ClassDB::bind_method(D_METHOD("set_use_incomplete_cholesky", "v"), &CurveNetDeformer3D::set_use_incomplete_cholesky);
+	ClassDB::bind_method(D_METHOD("get_use_incomplete_cholesky"), &CurveNetDeformer3D::get_use_incomplete_cholesky);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "deformation_active"),
 			"set_deformation_active", "is_deformation_active");
 
@@ -110,6 +113,14 @@ void CurveNetDeformer3D::set_deformation_active(bool p_v) {
 
 bool CurveNetDeformer3D::is_deformation_active() const {
 	return deformation_active;
+}
+
+void CurveNetDeformer3D::set_use_incomplete_cholesky(bool p_v) {
+	use_incomplete_cholesky = p_v;
+}
+
+bool CurveNetDeformer3D::get_use_incomplete_cholesky() const {
+	return use_incomplete_cholesky;
 }
 
 void CurveNetDeformer3D::_ready() {
@@ -370,10 +381,23 @@ void CurveNetDeformer3D::apply_deformation() {
 		return out;
 	};
 
+	// Lazily build the ICC(0) factor of LhsM_csr the first frame the
+	// flag is observed true. Factorisation is amortised across all
+	// subsequent solves so the per-frame path is just two backsolves
+	// per CG iter (same cost as one A·x mat-vec).
+	if (use_incomplete_cholesky && !rest_cache.incomplete_cholesky_built) {
+		rest_cache.incomplete_cholesky_factor = curvenet::incomplete_cholesky::factor_with_retry(
+			rest_cache.LhsM_csr, &rest_cache.incomplete_cholesky_shift);
+		rest_cache.incomplete_cholesky_built = !rest_cache.incomplete_cholesky_factor.breakdown;
+	}
+
 	// Multi-RHS sparse CG (one column at a time, sharing the cached
-	// CSR matrix + diagonal preconditioner across columns). Warm-starts
-	// each column from the previous frame's iterate when available.
+	// CSR matrix + preconditioner across columns). Warm-starts each
+	// column from the previous frame's iterate when available.
+	// Switches between D-Jacobi PCG (default) and ICC(0)-PCG (loop
+	// 100/3, gated on `use_incomplete_cholesky` and successful factorisation).
 	const std::size_t cg_max_iter = std::max<std::size_t>(50, nv * 2);
+	const bool icc_active = use_incomplete_cholesky && rest_cache.incomplete_cholesky_built;
 	auto cg_multi = [&](std::size_t k, const std::vector<double> &rhs,
 	                     const std::vector<double> *prev) {
 		std::vector<double> X(nv * k, 0.0);
@@ -385,10 +409,13 @@ void CurveNetDeformer3D::apply_deformation() {
 				b_col[i] = rhs[i * k + c];
 				x0_col[i] = have_prev ? (*prev)[i * k + c] : 0.0;
 			}
-			const std::vector<double> x_col =
-				curvenet::sparse::cg_with_guess(rest_cache.LhsM_csr,
-				                                 b_col, x0_col,
-				                                 cg_max_iter, 1e-8);
+			const std::vector<double> x_col = icc_active
+				? curvenet::incomplete_cholesky::cg_icc_with_guess(
+				      rest_cache.LhsM_csr, rest_cache.incomplete_cholesky_factor,
+				      b_col, x0_col, cg_max_iter, 1e-8)
+				: curvenet::sparse::cg_with_guess(
+				      rest_cache.LhsM_csr, b_col, x0_col,
+				      cg_max_iter, 1e-8);
 			for (std::size_t i = 0; i < nv; ++i) {
 				X[i * k + c] = x_col[i];
 			}

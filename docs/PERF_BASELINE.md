@@ -242,6 +242,34 @@ The reproducer for the stall is `tests/diag_multi_level_schwarz_70k`.
 The earlier 70k Chebyshev and 2-level Schwarz diags were removed
 as redundant.
 
+### Wired into the deformer ✓ (loop 100/4)
+
+`CurveNetDeformer3D` now exposes a `use_incomplete_cholesky`
+property (off by default; diagonal-Jacobi remains the production
+path). When on, the rest-pose factor is built lazily on the first
+solve and reused. The `cg_multi` lambda in `apply_deformation`
+branches between `sparse::cg_with_guess` (default) and
+`incomplete_cholesky::cg_icc_with_guess` (opt-in).
+
+Bench numbers from `tests/bench_deform_70k_icc` (12 cold-start
+RHS, no warm-start, same shape as `bench_deform_70k`):
+
+| path                  | bind     | solve (12 RHS) | per-RHS  | total    |
+|-----------------------|---------:|---------------:|---------:|---------:|
+| diagonal Jacobi       |   172 ms |       162 053 ms |  13 504 ms | 162 225 ms |
+| incomplete Cholesky   |  27 717 ms |        42 338 ms |   3 528 ms |  70 055 ms |
+| ratio                 |   ÷161   |          ×3.8  |   ×3.8  |   ×2.3   |
+
+Per-RHS solve drops 3.8× (13.5 s → 3.5 s). Bind cost grows from
+172 ms to 27.7 s (one-shot for a fixed rest pose), which is paid
+once and amortised. After bind, every subsequent frame is 3.8×
+faster. Both still 0.02 FPS on a single CPU core — much further
+to go before we hit the 90 FPS PCVR target — but this is the
+first preconditioner that beats the production path on the
+deformer-shaped 12-RHS workload.
+
+Reproducer: `make -C tests bench_70k_icc`.
+
 ### Live candidate ✓ (loop 100/3 — ICC(0))
 
 Test gate passed. **Shifted ICC(0)-PCG** (Manteuffel 1980 diagonal

@@ -79,13 +79,13 @@ int main() {
     const sp::SparseMatrixCSR A = dense_to_csr(Atri, 3);
 
     ok &= rc::check("ICC factor succeeds on tridiagonal SPD", [&] {
-        const icc::IccFactor fac = icc::factor(A);
+        const icc::IncompleteCholeskyFactor fac = icc::factor(A);
         RC_ASSERT(!fac.breakdown);
         RC_ASSERT(fac.L.rows == 3u);
     });
 
     ok &= rc::check("L is lower-triangular (no entries above diag)", [&] {
-        const icc::IccFactor fac = icc::factor(A);
+        const icc::IncompleteCholeskyFactor fac = icc::factor(A);
         for (std::size_t i = 0; i < fac.L.rows; ++i) {
             for (int k = fac.L.row_ptr[i]; k < fac.L.row_ptr[i + 1]; ++k) {
                 RC_ASSERT(fac.L.col_idx[k] <= static_cast<int>(i));
@@ -94,7 +94,7 @@ int main() {
     });
 
     ok &= rc::check("L · L^T == A on tridiagonal (full pattern preserved)", [&] {
-        const icc::IccFactor fac = icc::factor(A);
+        const icc::IncompleteCholeskyFactor fac = icc::factor(A);
         const auto LLT = csr_lt_dot_l(fac.L);
         for (std::size_t k = 0; k < 9; ++k) {
             RC_ASSERT(std::fabs(LLT[k] - Atri[k]) < 1e-12);
@@ -102,7 +102,7 @@ int main() {
     });
 
     ok &= rc::check("forward+back sub recovers x from b = A x", [&] {
-        const icc::IccFactor fac = icc::factor(A);
+        const icc::IncompleteCholeskyFactor fac = icc::factor(A);
         const std::vector<double> x_true = { 1.5, -2.0, 0.75 };
         const std::vector<double> b = sp::spmv(A, x_true);
         const std::vector<double> y = icc::forward_sub(fac.L, b);
@@ -119,7 +119,7 @@ int main() {
             0.0,  1e-2, 1e+4
         };
         const sp::SparseMatrixCSR Aw = dense_to_csr(Awide, 3);
-        const icc::IccFactor fac = icc::factor(Aw);
+        const icc::IncompleteCholeskyFactor fac = icc::factor(Aw);
         RC_ASSERT(!fac.breakdown);
         const auto LLT = csr_lt_dot_l(fac.L);
         for (std::size_t k = 0; k < 9; ++k) {

@@ -38,7 +38,7 @@ namespace incomplete_cholesky {
 
 // Lower-triangular CSR factor `L` such that L · L^T ≈ A.
 // `L.row_ptr[i]..L.row_ptr[i+1]` holds entries `L[i, j]` with j ≤ i.
-struct IccFactor {
+struct IncompleteCholeskyFactor {
     sparse::SparseMatrixCSR L;
     bool                    breakdown;  // true if any diag(L)^2 ≤ 0
 };
@@ -56,10 +56,10 @@ struct IccFactor {
 // because PCG only requires M to be SPD and a "good approximation"
 // — a small shift tightens kappa(M^{-1}A) modestly while ruling out
 // breakdown. Empirically `alpha = 1e-3` clears most cot-Laplacians.
-inline IccFactor factor(const sparse::SparseMatrixCSR &A,
+inline IncompleteCholeskyFactor factor(const sparse::SparseMatrixCSR &A,
                             double diag_shift = 0.0) {
     const std::size_t n = A.rows;
-    IccFactor out;
+    IncompleteCholeskyFactor out;
     out.breakdown = false;
 
     // Build L's sparsity pattern from tril(A): for each row i,
@@ -224,9 +224,64 @@ inline std::vector<double> backward_sub(const sparse::SparseMatrixCSR &L,
 }
 
 // Apply M^{-1} = L^{-T}·L^{-1} to a vector r.
-inline std::vector<double> apply(const IccFactor &fac,
-                                    const std::vector<double> &r) {
+//
+// (Named `apply_minv` rather than `apply` to avoid ADL-collision
+// with `std::apply` under C++17+ when this header is included from
+// a TU that uses unqualified `apply`.)
+inline std::vector<double> apply_minv(const IncompleteCholeskyFactor &fac,
+                                          const std::vector<double> &r) {
     return backward_sub(fac.L, forward_sub(fac.L, r));
+}
+
+// Factor with progressive diagonal-shift retry. Tries shifts in
+// {0, 1e-4, 1e-3, 1e-2, 1e-1, 1.0} until the no-fill ICC(0)
+// factorisation succeeds. Returns IncompleteCholeskyFactor{ breakdown=true } if
+// none works. The shift used is recorded in `shift_used`.
+inline IncompleteCholeskyFactor factor_with_retry(const sparse::SparseMatrixCSR &A,
+                                       double *shift_used = nullptr) {
+    IncompleteCholeskyFactor fac;
+    for (double s : { 0.0, 1e-4, 1e-3, 1e-2, 1e-1, 1.0 }) {
+        fac = factor(A, s);
+        if (shift_used) *shift_used = s;
+        if (!fac.breakdown) return fac;
+    }
+    return fac;
+}
+
+// ICC(0)-PCG with an explicit initial guess. Mirror of
+// `sparse::cg_with_guess` with the inner Jacobi preconditioner
+// swapped for `apply(fac, ...)`. Same convergence semantics:
+// when `x0` is close to the true solution, residual starts small
+// and iter count drops.
+inline std::vector<double> cg_icc_with_guess(
+        const sparse::SparseMatrixCSR &A,
+        const IncompleteCholeskyFactor &fac,
+        const std::vector<double> &b,
+        const std::vector<double> &x0,
+        std::size_t max_iter,
+        double tol) {
+    std::vector<double> x = x0;
+    const std::vector<double> Ax0 = sparse::spmv(A, x0);
+    std::vector<double> r = sparse::saxpby(1.0, b, -1.0, Ax0);
+    std::vector<double> z = apply_minv(fac, r);
+    std::vector<double> p = z;
+    double rz_old = sparse::dot(r, z);
+    const double tol_sq = tol * tol;
+    for (std::size_t iter = 0; iter < max_iter; ++iter) {
+        const std::vector<double> Ap = sparse::spmv(A, p);
+        const double pAp = sparse::dot(p, Ap);
+        if (pAp == 0.0) break;
+        const double alpha = rz_old / pAp;
+        sparse::axpy_inplace(alpha, p, x);
+        sparse::axpy_inplace(-alpha, Ap, r);
+        if (sparse::dot(r, r) < tol_sq) break;
+        z = apply_minv(fac, r);
+        const double rz_new = sparse::dot(r, z);
+        const double beta = (rz_old == 0.0) ? 0.0 : (rz_new / rz_old);
+        p = sparse::saxpby(1.0, z, beta, p);
+        rz_old = rz_new;
+    }
+    return x;
 }
 
 } // namespace incomplete_cholesky
