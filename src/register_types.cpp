@@ -3,8 +3,12 @@
 #include "register_types.h"
 
 #include "curvenet_deformer_3d.h"
+#include "vertex_handles_3d.h"
+#include "vertex_handles_editor_plugin.h"
+#include "vertex_handles_gizmo_plugin.h"
 
 #include <gdextension_interface.h>
+#include <godot_cpp/classes/editor_plugin_registration.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/defs.hpp>
 #include <godot_cpp/godot.hpp>
@@ -12,16 +16,19 @@
 using namespace godot;
 
 void initialize_gdextension_types(ModuleInitializationLevel p_level) {
-	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
-		return;
+	if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE) {
+		ClassDB::register_class<CurveNetDeformer3D>();
+		ClassDB::register_class<VertexHandles3D>();
 	}
-	ClassDB::register_class<CurveNetDeformer3D>();
+	if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR) {
+		ClassDB::register_class<VertexHandlesGizmoPlugin>();
+		ClassDB::register_class<VertexHandlesEditorPlugin>();
+		EditorPlugins::add_by_type<VertexHandlesEditorPlugin>();
+	}
 }
 
 void uninitialize_gdextension_types(ModuleInitializationLevel p_level) {
-	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
-		return;
-	}
+	(void)p_level;
 }
 
 extern "C" {

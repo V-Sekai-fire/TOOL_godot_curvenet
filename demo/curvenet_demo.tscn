@@ -28,7 +28,7 @@ mesh = SubResource("PlaneMesh_src")
 material_override = SubResource("Mat_src")
 visible = false
 
-[node name="VertexHandles" type="VertexHandles" parent="SourceMesh"]
+[node name="VertexHandles" type="VertexHandles3D" parent="SourceMesh"]
 wireframe = true
 wireframe_color = Color(0.4, 0.7, 1.0, 1.0)
 
