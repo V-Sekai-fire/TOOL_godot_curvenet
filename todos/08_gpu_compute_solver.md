@@ -40,6 +40,12 @@ src/curvenet/sparse_linalg.h               src/curvenet/gpu_sparse_solve.{h,cpp}
                                              y = A · x  (1 thread per row, 1 RHS column)
                                            src/curvenet/shaders/dot_reduce.glsl
                                              scalar = Σ aᵢ bᵢ  (workgroup reduction)
+                                             df32 accumulator: each lane keeps a
+                                             (hi, lo) fp32 pair so the partial
+                                             sums don't lose precision over 100K
+                                             terms. Reduces to a single df32
+                                             scalar; the CPU host reads back the
+                                             pair and folds it to fp64 for α/β.
                                            src/curvenet/shaders/axpy.glsl
                                              y ← y + α x   (in place)
                                            src/curvenet/shaders/jacobi.glsl
@@ -164,7 +170,7 @@ for CG is explicit, but that's a refinement, not a blocker.
 | Risk | Mitigation |
 |---|---|
 | `gl_compatibility` users (web build) lose support | Keep CPU sparse CG path; auto-select via RD::is_compute_supported |
-| Float32 precision at 100k with high-κ Laplacian | Iterative refinement: one CPU residual check + correction step at the end of CG |
+| Float32 precision at 100k with high-κ Laplacian | Per-kernel split: fp32 in spmv/axpy/jacobi (each ~7 ε), df32 (two-fp32 pair, ~48-bit mantissa, Da Graça 2006) only in the dot reduction where the n·ε error of a 100K-element fp32 sum stagnates CG |
 | Quest 3 Android Vulkan quirks | Test Phase 1 hello-world on a real Quest 3 before going deeper |
 | Renderer-switch visual regression on demo | Tune StandardMaterial3D + light energy; this is a small visual tweak, not a blocker |
 | Dispatch overhead dominates at small mesh sizes | At ≤5k verts the CPU path is faster anyway; runtime threshold for which solver to use |

@@ -14,20 +14,21 @@
 //   binding 5  storage  Y            { float y[]; }         // length rows
 //
 // Float32 throughout. The CPU side packs CSR's `double` values into
-// floats before upload. Two precision options were considered and
-// rejected for spmv:
-//   - Native fp64: ~16x slower on RDNA 2 (Steam Deck), and Adreno
-//     (Quest 3) has effectively no fp64 throughput — the ~2 TFLOP/s
-//     fp32 budget vanishes, killing the GPU win.
-//   - Double-float (df32, two fp32 carries per value, ~48 bit
-//     mantissa): real option but ~3-8x per-op cost + 2x bandwidth, and
-//     spmv's per-row sum has only ~7 nonzeros on a triangle Laplacian,
-//     so fp32 has plenty of headroom anyway.
-// The precision floor in the GPU CG path will be the dot products in
-// the iteration loop, not spmv. Mixed-precision iterative refinement
-// (Buttari 2008, Carson-Higham 2018) handles that with one fp64
-// residual + correction step on the CPU at the end of CG, recovering
-// fp64-quality accuracy at fp32 GPU cost.
+// floats before upload. Per-row spmv has only ~7 nonzeros on a
+// triangle Laplacian, so the fp32 accumulation error is ~7·ε and well
+// below the §4.3 solve's tolerance.
+//
+// Precision strategy for the larger CG path (per-kernel, todos/08):
+//   - spmv / axpy / jacobi: fp32 (this shader and the others like it)
+//   - dot reduction:        df32 or Kahan-compensated summation
+// fp32 dots over 100K elements have relative error ~n·ε ≈ 6e-3, only
+// 2-3 reliable digits — that's where CG stagnates, not in spmv. df32
+// carries the running sum as a (hi, lo) fp32 pair (~48 bit effective
+// mantissa) at ~3x per-add cost, no extra memory bandwidth. Da Graça
+// 2006 has the operator definitions; CUDA SDK and ARM's compute libs
+// both ship reference implementations. Cheaper than the CPU-side
+// iterative refinement of Buttari 2008 / Carson-Higham 2018, which
+// pays for a per-frame readback we can't afford on Quest 3.
 #version 450
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
