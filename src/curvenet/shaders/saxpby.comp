@@ -1,0 +1,28 @@
+// Generic linear combination: out[i] = alpha * x[i] + beta * y[i].
+// Used in CG to update the search direction p ← z + beta * p.
+// Mirrors `curvenet::sparse::saxpby` from sparse_linalg.h.
+//
+// Buffer layout (set 0):
+//   binding 0  uniform  Params { uint n; float alpha; float beta; }
+//   binding 1  storage  X      { float x[]; }
+//   binding 2  storage  Y      { float y[]; }
+//   binding 3  storage  Out    { float out[]; }
+#version 450
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform Params {
+    uint  n;
+    float alpha;
+    float beta;
+};
+
+layout(set = 0, binding = 1) readonly  buffer X   { float x[];   };
+layout(set = 0, binding = 2) readonly  buffer Y   { float y[];   };
+layout(set = 0, binding = 3) writeonly buffer Out { float dst[]; };
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= n) return;
+    // Single fma + mul keeps the per-element error at ~2 ulp.
+    dst[i] = fma(alpha, x[i], beta * y[i]);
+}

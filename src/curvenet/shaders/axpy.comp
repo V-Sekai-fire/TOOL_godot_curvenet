@@ -1,0 +1,25 @@
+// In-place axpy: y[i] += alpha * x[i].
+// Pure fp32 (per-element, no accumulation, ~1 ulp error per write —
+// well below the fp64 floor df32 dot-products are designed to hit).
+// Mirrors `curvenet::sparse::axpy_inplace` from src/curvenet/sparse_linalg.h.
+//
+// Buffer layout (set 0):
+//   binding 0  uniform  Params { uint n; float alpha; }
+//   binding 1  storage  X      { float x[]; }
+//   binding 2  storage  Y      { float y[]; }
+#version 450
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform Params {
+    uint  n;
+    float alpha;
+};
+
+layout(set = 0, binding = 1) readonly buffer X { float x[]; };
+layout(set = 0, binding = 2)          buffer Y { float y[]; };
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= n) return;
+    y[i] = fma(alpha, x[i], y[i]);
+}
