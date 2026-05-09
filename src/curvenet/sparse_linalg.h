@@ -156,6 +156,49 @@ inline std::vector<double> cg(const SparseMatrixCSR &A,
 	return x;
 }
 
+// CG with an explicit initial guess `x0`. Identical fixed point to
+// `cg` (same A, same b → same true solution); converges faster when
+// `x0` is close. The runtime warm-starts each frame's solve with the
+// previous frame's iterate, so on smooth handle drags the residual
+// drops below `tol` after a handful of iterations instead of restarting
+// from zero.
+inline std::vector<double> cg_with_guess(const SparseMatrixCSR &A,
+                                          const std::vector<double> &b,
+                                          const std::vector<double> &x0,
+                                          std::size_t max_iter,
+                                          double tol) {
+	const std::size_t n = A.rows;
+	const std::vector<double> d = diagonal(A);
+	std::vector<double> x = x0;
+	const std::vector<double> Ax0 = spmv(A, x0);
+	std::vector<double> r = saxpby(1.0, b, -1.0, Ax0);
+	std::vector<double> z = apply_jacobi(d, r);
+	std::vector<double> p = z;
+	double rz_old = dot(r, z);
+	const double tol_sq = tol * tol;
+	for (std::size_t iter = 0; iter < max_iter; ++iter) {
+		const std::vector<double> Ap = spmv(A, p);
+		const double pAp = dot(p, Ap);
+		if (pAp == 0.0) {
+			break;
+		}
+		const double alpha = rz_old / pAp;
+		axpy_inplace(alpha, p, x);
+		axpy_inplace(-alpha, Ap, r);
+		const double rr = dot(r, r);
+		if (rr < tol_sq) {
+			break;
+		}
+		z = apply_jacobi(d, r);
+		const double rz_new = dot(r, z);
+		const double beta = (rz_old == 0.0) ? 0.0 : (rz_new / rz_old);
+		p = saxpby(1.0, z, beta, p);
+		rz_old = rz_new;
+	}
+	(void)n;
+	return x;
+}
+
 // Multi-RHS CG: independent solve per column. Each call shares the
 // sparse representation but does its own iteration.
 inline std::vector<double> cg_multi(const SparseMatrixCSR &A,

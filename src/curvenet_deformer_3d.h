@@ -62,6 +62,13 @@ class CurveNetDeformer3D : public MeshInstance3D {
 		curvenet::sparse::SparseMatrixCSR     LhsM_csr;         // nv × nv  Vᵀ·Lₕ·V
 		int                                   nc          = 0;  // number of sample columns
 		std::uint64_t                         source_hash = 0;
+		// Warm-start state: the previous frame's solver iterates,
+		// fed back into `cg_with_guess` so smooth interactive drags
+		// converge in 1-2 CG steps instead of restarting from zero.
+		// `prev_*_valid` is false until the first solve completes.
+		std::vector<double>                   prev_Fv;          // nv × 9
+		std::vector<double>                   prev_Xv;          // nv × 3
+		bool                                  prev_solve_valid = false;
 	};
 	mutable RestCache rest_cache;
 

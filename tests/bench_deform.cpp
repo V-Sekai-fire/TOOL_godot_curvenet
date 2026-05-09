@@ -214,21 +214,29 @@ BenchRow run_sparse(int n, int frames) {
 	};
 
 	const std::size_t cg_max_iter = std::max<std::size_t>(50, nv * 2);
-	auto cg_multi = [&](std::size_t k, const std::vector<double> &rhs) {
+	auto cg_multi = [&](std::size_t k, const std::vector<double> &rhs,
+	                     const std::vector<double> *prev) {
 		std::vector<double> X(nv * k, 0.0);
 		std::vector<double> b_col(nv, 0.0);
+		std::vector<double> x0_col(nv, 0.0);
+		const bool have_prev = (prev != nullptr) && (prev->size() == nv * k);
 		for (std::size_t cc = 0; cc < k; ++cc) {
 			for (std::size_t i = 0; i < nv; ++i) {
 				b_col[i] = rhs[i * k + cc];
+				x0_col[i] = have_prev ? (*prev)[i * k + cc] : 0.0;
 			}
 			const std::vector<double> x_col =
-				sp::cg(LhsM_csr, b_col, cg_max_iter, 1e-8);
+				sp::cg_with_guess(LhsM_csr, b_col, x0_col, cg_max_iter, 1e-8);
 			for (std::size_t i = 0; i < nv; ++i) {
 				X[i * k + cc] = x_col[i];
 			}
 		}
 		return X;
 	};
+
+	std::vector<double> prev_Fv;
+	std::vector<double> prev_Xv;
+	bool prev_valid = false;
 
 	double frame_total_ms = 0.0;
 	for (int f = 0; f < frames; ++f) {
@@ -243,7 +251,8 @@ BenchRow run_sparse(int n, int frames) {
 		for (std::size_t i = 0; i < nv * 9; ++i) {
 			rhs_a[i] = -Vt_Lh_CFc[i];
 		}
-		const std::vector<double> Fv = cg_multi(9, rhs_a);
+		const std::vector<double> Fv =
+			cg_multi(9, rhs_a, prev_valid ? &prev_Fv : nullptr);
 
 		const std::vector<double> Fh =
 			ds::compute_fh(c, sample_col, Fv, Fc, 9);
@@ -264,8 +273,13 @@ BenchRow run_sparse(int n, int frames) {
 		for (std::size_t i = 0; i < nv * 3; ++i) {
 			rhs_b[i] = -Vt_Lh_diff[i];
 		}
-		const std::vector<double> Xv = cg_multi(3, rhs_b);
+		const std::vector<double> Xv =
+			cg_multi(3, rhs_b, prev_valid ? &prev_Xv : nullptr);
 		(void)Xv;
+
+		prev_Fv = Fv;
+		prev_Xv = Xv;
+		prev_valid = true;
 
 		frame_total_ms += now_ms() - t0;
 	}

@@ -63,6 +63,9 @@ void CurveNetDeformer3D::invalidate_cache() {
 	rest_cache.col_input_handle.clear();
 	rest_cache.Lh_csr   = curvenet::sparse::SparseMatrixCSR{};
 	rest_cache.LhsM_csr = curvenet::sparse::SparseMatrixCSR{};
+	rest_cache.prev_Fv.clear();
+	rest_cache.prev_Xv.clear();
+	rest_cache.prev_solve_valid = false;
 	rest_cache.nc = 0;
 	rest_cache.source_hash = 0;
 }
@@ -363,18 +366,24 @@ void CurveNetDeformer3D::apply_deformation() {
 	};
 
 	// Multi-RHS sparse CG (one column at a time, sharing the cached
-	// CSR matrix + diagonal preconditioner across columns).
+	// CSR matrix + diagonal preconditioner across columns). Warm-starts
+	// each column from the previous frame's iterate when available.
 	const std::size_t cg_max_iter = std::max<std::size_t>(50, nv * 2);
-	auto cg_multi = [&](std::size_t k, const std::vector<double> &rhs) {
+	auto cg_multi = [&](std::size_t k, const std::vector<double> &rhs,
+	                     const std::vector<double> *prev) {
 		std::vector<double> X(nv * k, 0.0);
 		std::vector<double> b_col(nv, 0.0);
+		std::vector<double> x0_col(nv, 0.0);
+		const bool have_prev = (prev != nullptr) && (prev->size() == nv * k);
 		for (std::size_t c = 0; c < k; ++c) {
 			for (std::size_t i = 0; i < nv; ++i) {
 				b_col[i] = rhs[i * k + c];
+				x0_col[i] = have_prev ? (*prev)[i * k + c] : 0.0;
 			}
 			const std::vector<double> x_col =
-				curvenet::sparse::cg(rest_cache.LhsM_csr, b_col,
-				                       cg_max_iter, 1e-8);
+				curvenet::sparse::cg_with_guess(rest_cache.LhsM_csr,
+				                                 b_col, x0_col,
+				                                 cg_max_iter, 1e-8);
 			for (std::size_t i = 0; i < nv; ++i) {
 				X[i * k + c] = x_col[i];
 			}
@@ -394,7 +403,8 @@ void CurveNetDeformer3D::apply_deformation() {
 	for (std::size_t i = 0; i < nv * 9; ++i) {
 		rhs_a[i] = -Vt_Lh_CFc[i];
 	}
-	const std::vector<double> Fv = cg_multi(9, rhs_a);
+	const std::vector<double> Fv = cg_multi(9, rhs_a,
+		rest_cache.prev_solve_valid ? &rest_cache.prev_Fv : nullptr);
 
 	// Bridge (Eq. 3 + per-face average): build F_f and y_h.
 	const std::vector<double> Fh =
@@ -420,7 +430,12 @@ void CurveNetDeformer3D::apply_deformation() {
 	for (std::size_t i = 0; i < nv * 3; ++i) {
 		rhs_b[i] = -Vt_Lh_diff[i];
 	}
-	const std::vector<double> Xv = cg_multi(3, rhs_b);
+	const std::vector<double> Xv = cg_multi(3, rhs_b,
+		rest_cache.prev_solve_valid ? &rest_cache.prev_Xv : nullptr);
+
+	rest_cache.prev_Fv = Fv;
+	rest_cache.prev_Xv = Xv;
+	rest_cache.prev_solve_valid = true;
 
 	// Emit the deformed mesh — bypassing SurfaceTool's generate_normals
 	// vertex splits keeps the original vertex count and preserves index

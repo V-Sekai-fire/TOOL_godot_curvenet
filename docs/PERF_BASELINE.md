@@ -11,9 +11,10 @@ The benchmark builds an N×N triangulated unit-plane grid, promotes the
 four corner vertices to curvenet samples, and times 30 frames of the
 §4.3 two-stage solve with identity `Fc` and a slowly-drifting `Xc` per
 frame. Two paths are timed: a dense LU factor-once path, and a sparse
-CSR `Lₕ` path with Jacobi-preconditioned conjugate gradient. The
-runtime uses the sparse path; the dense path is kept for regression
-checking.
+CSR `Lₕ` path with Jacobi-preconditioned conjugate gradient and
+warm-started initial guess (each frame seeds CG with the previous
+frame's iterate). The runtime uses the sparse path; the dense path is
+kept for regression checking.
 
 ## Dense path
 
@@ -33,20 +34,23 @@ at 900 verts: larger grids exhaust memory before reporting a number.
 
 | N×N  | `nv`   | `nh`   | bind (ms) | frame avg (ms) | frames/s |
 |------|--------|--------|-----------|----------------|----------|
-|  10² |    100 |    522 |       0.3 |           0.12 |   8050   |
-|  15² |    225 |   1232 |       1.0 |           0.49 |   2028   |
-|  20² |    400 |   2242 |       2.5 |           1.25 |    803   |
-|  25² |    625 |   3552 |       5.2 |           2.72 |    368   |
-|  30² |    900 |   5162 |       9.9 |           5.06 |    198   |
-|  40² |   1600 |   9282 |      29.5 |          13.93 |     72   |
-|  50² |   2500 |  14602 |      71.3 |          30.18 |     33   |
-|  70² |   4900 |  28842 |     262.3 |          99.97 |     10   |
+|  10² |    100 |    522 |       0.3 |           0.07 |  13881   |
+|  15² |    225 |   1232 |       0.9 |           0.24 |   4096   |
+|  20² |    400 |   2242 |       2.3 |           0.64 |   1568   |
+|  25² |    625 |   3552 |       4.9 |           1.43 |    700   |
+|  30² |    900 |   5162 |       9.7 |           2.77 |    361   |
+|  40² |   1600 |   9282 |      29.0 |           8.09 |    124   |
+|  50² |   2500 |  14602 |      68.1 |          18.98 |     53   |
+|  70² |   4900 |  28842 |     256.3 |          69.05 |     15   |
 
-At 900 verts the sparse path is ~90× faster per frame than dense. Bind
-memory is `O(nnz(Lₕ))` ≈ `O(nh)`, so the table extends to 4900 verts
-without exhausting memory. CG iteration count grows with `√κ` of the
-LHS; the Jacobi preconditioner is enough at these sizes but will need
-upgrading for the 50K+ character meshes the runtime targets (see
+At 900 verts the sparse + warm-start path is ~160× faster per frame
+than dense. Bind memory is `O(nnz(Lₕ))` ≈ `O(nh)`, so the table extends
+to 4900 verts without exhausting memory. Warm-starting from the
+previous frame's iterate adds another 1.5–1.8× over cold-start CG on
+smooth interactive drags, because the per-frame change in `Fv` and
+`Xv` is small. CG iteration count grows with `√κ` of the LHS; the
+Jacobi preconditioner is enough at these sizes but will need upgrading
+for the 50K+ character meshes the runtime targets (see
 `todos/08_gpu_compute_solver.md`).
 
 ## What this means for the target platforms
@@ -84,12 +88,9 @@ at bind, which adds a small constant.
 
 ## Next perf milestones
 
-1. Warm-start CG. Cache the previous frame's `Xv` and `Fv` as the
-   initial guess; on smooth interactive drags this should reduce CG
-   iteration count by 4–8×.
-2. Incomplete Cholesky preconditioner on `LhsM_csr` to reduce
+1. Incomplete Cholesky preconditioner on `LhsM_csr` to reduce
    iteration count further, at the cost of extra bind time.
-3. GPU compute path per `todos/08_gpu_compute_solver.md` for the
+2. GPU compute path per `todos/08_gpu_compute_solver.md` for the
    100K-vertex Steam Deck and Quest 3 target.
 
 ## When to re-run

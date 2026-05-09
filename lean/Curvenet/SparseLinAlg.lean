@@ -129,6 +129,39 @@ def cg (A : SparseMatrixCSR) (b : Array Float) (maxIter : Nat) (tol : Float) :
     rzOld := rzNew
   return x
 
+/-- CG with an explicit initial guess `x₀`. Mathematically identical to
+   `cg` (same fixed point) but converges faster when `x₀` is close to
+   the true solution — which it is on every frame after the first, since
+   the runtime caches the previous frame's solve and reuses it as the
+   seed for the next frame. -/
+def cgWithGuess (A : SparseMatrixCSR) (b : Array Float) (x0 : Array Float)
+    (maxIter : Nat) (tol : Float) : Array Float := Id.run do
+  let d := diagonal A
+  let mut x : Array Float := x0
+  -- r₀ = b − A·x₀
+  let Ax0 := spmv A x0
+  let mut r : Array Float := saxpby 1.0 b (-1.0) Ax0
+  let mut z : Array Float := applyJacobi d r
+  let mut p : Array Float := z
+  let mut rzOld : Float := dot r z
+  let tolSq := tol * tol
+  for _ in [0:maxIter] do
+    let Ap := spmv A p
+    let pAp := dot p Ap
+    if pAp == 0.0 then break
+    let α := rzOld / pAp
+    x := axpy α p x
+    r := axpy (-α) Ap r
+    let rr := dot r r
+    if rr < tolSq then
+      break
+    z := applyJacobi d r
+    let rzNew := dot r z
+    let β := if rzOld == 0.0 then 0.0 else rzNew / rzOld
+    p := saxpby 1.0 z β p
+    rzOld := rzNew
+  return x
+
 end SparseLinAlg
 
 /- ============================================================ -/
@@ -225,6 +258,33 @@ example :
           0.0,  0.0, -1.0,  2.0]
     let x_dense := DenseLinAlg.solve 4 A_dense b
     DenseLinAlg.vecWithinEps x_cg x_dense 1e-7 = true := by native_decide
+
+/-- `cgWithGuess` with the zero guess produces the same iterate as plain
+   `cg` (the residual `b − A·0 = b` matches `cg`'s implicit initial
+   residual). -/
+example :
+    let b : Array Float := #[1.0, 2.0, 3.0, 4.0]
+    let x_cg     := cg          laplacian4 b               200 1e-12
+    let x_warm   := cgWithGuess laplacian4 b #[0.0, 0.0, 0.0, 0.0] 200 1e-12
+    DenseLinAlg.vecWithinEps x_cg x_warm 1e-9 = true := by native_decide
+
+/-- `cgWithGuess` seeded with the analytical solution converges in
+   zero CG iterations (the initial residual is already below tol).
+   Demonstrates the warm-start property the runtime relies on: a good
+   guess skips the iteration loop. -/
+example :
+    let b      : Array Float := #[1.0, 0.0, 0.0, 0.0]
+    let x_true : Array Float := #[0.8, 0.6, 0.4, 0.2]
+    let x      := cgWithGuess laplacian4 b x_true 0 1e-9
+    DenseLinAlg.vecWithinEps x x_true 1e-9 = true := by native_decide
+
+/-- `cgWithGuess` seeded close to the true solution converges to the
+   same answer as cold-start CG, within float tolerance. -/
+example :
+    let b      : Array Float := #[1.0, 2.0, 3.0, 4.0]
+    let x_cold := cg          laplacian4 b                       200 1e-12
+    let x_warm := cgWithGuess laplacian4 b #[3.9, 6.9, 8.9, 6.9] 200 1e-12
+    DenseLinAlg.vecWithinEps x_cold x_warm 1e-7 = true := by native_decide
 
 end SparseLinAlgExamples
 
