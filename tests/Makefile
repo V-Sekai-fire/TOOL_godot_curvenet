@@ -25,7 +25,7 @@ RC_SRC := $(shell find $(RC)/src -name "*.cpp")
 RC_OBJ := $(RC_SRC:.cpp=.o)
 LIBRC := librapidcheck.a
 
-TESTS := test_bezier test_profile_curve test_coons_patch test_ngon_patch test_tris_to_quads test_curvenet test_bilinear_inverse test_binding test_pipeline test_mean_value
+TESTS := test_bezier test_profile_curve test_coons_patch test_ngon_patch test_tris_to_quads test_curvenet test_bilinear_inverse test_binding test_pipeline test_mean_value test_halfedge
 TEST_BINS := $(addprefix bin/,$(TESTS))
 
 .PHONY: all test clean
