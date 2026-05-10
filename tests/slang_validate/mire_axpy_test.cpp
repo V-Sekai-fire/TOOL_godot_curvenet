@@ -1,16 +1,17 @@
-// Real-input validator for Curvenet.SlangCodegen.Axpy at production scale.
-// Uses the Mire 70k-vertex mesh (auto-generated from MireQuest.blend; see
-// tests/mire_body_70k_data.h) as input data, exercising the slangc-emitted
-// axpy kernel across multiple thread groups instead of the single-group
-// n=4 path that axpy_test.cpp covers.
+// Production-scale validator for Curvenet.SlangCodegen.Axpy. Exercises
+// the slangc-emitted axpy kernel across multiple thread groups, where
+// the n=4 path in axpy_test.cpp can't reach the tail-group bounds-check
+// branch.
 //
-// Compute: y[i] = fma(alpha, x[i], y[i]) for i < N where
-//   N      = mire_body_70k::n_verts * 3 = 244839 floats
-//   alpha  = 1.5
-//   x[i]   = mire_body_70k::positions[i]            (the mesh positions)
-//   y[i]   = mire_body_70k::positions[i] * 0.25     (a scaled copy)
-// Reference: host computes the same fma on the same inputs and the test
-// asserts pointwise equality within an fp32-fma tolerance.
+// Inputs are synthesised to ~Mire-vertex scale (81613 verts × 3 = 244839
+// floats) with deterministic, mesh-shaped magnitudes (|x| ≤ ~2) so the
+// fp32-fma tolerance below stays meaningful. Earlier versions of this
+// test inlined the actual Mire mesh as a 240k-line .h header; the
+// safetensors-based data path replaced that and the kernel itself
+// doesn't care whether the buffer holds real positions or sin/cos —
+// only that the bounds-check fires and the fma is bit-exact.
+//
+// Compute: y[i] = fma(alpha, x[i], y[i]) for i < N.
 
 #include <chrono>
 #include <cmath>
@@ -19,24 +20,23 @@
 #include <vector>
 
 #include "axpy_emit.cpp"
-#include "../mire_body_70k_data.h"
 
-// Hard wallclock cap. axpy on 245k floats is microseconds on any CPU
-// from the last decade; anything above 5 s means the kernel hung or
-// the C++ optimizer chose something pathological. Fail loud.
+static constexpr uint32_t kNVerts = 81613;   // matches the historical Mire body count
 static constexpr double kBudgetSeconds = 5.0;
 
 int main() {
     const auto t0 = std::chrono::steady_clock::now();
-    const uint32_t N = static_cast<uint32_t>(mire_body_70k::n_verts) * 3u;
+    const uint32_t N = kNVerts * 3u;
     const float alpha = 1.5f;
 
     std::vector<float> x(N);
     std::vector<float> y(N);
     std::vector<float> y_ref(N);
     for (uint32_t i = 0; i < N; ++i) {
-        x[i] = mire_body_70k::positions[i];
-        y[i] = mire_body_70k::positions[i] * 0.25f;
+        // Deterministic mesh-shaped pseudo-positions in [-2, 2].
+        const float t = static_cast<float>(i) * 1.0e-4f;
+        x[i] = 2.0f * std::sin(0.7f * t) * std::cos(t);
+        y[i] = x[i] * 0.25f;
         y_ref[i] = std::fma(alpha, x[i], y[i]);
     }
 
@@ -60,8 +60,8 @@ int main() {
         const float d = std::fabs(y[i] - y_ref[i]);
         if (d > max_abs_diff) max_abs_diff = d;
         // fp32 fma is bit-exact in both implementations; allow only
-        // the smallest non-zero ulp at this magnitude (Mire positions
-        // peak around |2|, so ulp ~ 2.4e-7).
+        // the smallest non-zero ulp at this magnitude (|x| peaks
+        // around 2, so ulp ~ 2.4e-7).
         if (d > 1e-6f) {
             if (fails < 5) {
                 std::fprintf(stderr,
@@ -83,8 +83,8 @@ int main() {
     }
     if (fails == 0) {
         std::printf(
-            "mire_axpy: %u/%u OK (alpha=%g, n_verts=%d, max_abs_diff=%g, %u groups, %.1fms)\n",
-            N, N, alpha, mire_body_70k::n_verts, max_abs_diff, groups,
+            "mire_axpy: %u/%u OK (alpha=%g, n_verts=%u, max_abs_diff=%g, %u groups, %.1fms)\n",
+            N, N, alpha, kNVerts, max_abs_diff, groups,
             elapsed * 1000.0);
         return 0;
     }

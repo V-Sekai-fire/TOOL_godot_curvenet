@@ -3,10 +3,10 @@ import LeanGltf
 /-!
 # `gltf_inspect` — read a `.glb`, parse it, print a summary
 
-The reverse direction of `mire_to_gltf`. Demonstrates that LeanGltf
-can ingest `.glb` files, parse the JSON chunk into our `Value` AST,
-and surface key counts (mesh / accessor / extension classes) without
-a full glTF round-trip.
+The reader counterpart to `safetensors_to_gltf`. Demonstrates that
+LeanGltf can ingest `.glb` files, parse the JSON chunk into our
+`Value` AST, and surface key counts (mesh / accessor / extension
+classes) without a full glTF round-trip.
 
 Usage:
 
