@@ -1,5 +1,8 @@
 name = "Curvenet"
-defaultTargets = ["Curvenet"]
+defaultTargets = ["Curvenet", "LeanGltf"]
 
 [[lean_lib]]
 name = "Curvenet"
+
+[[lean_lib]]
+name = "LeanGltf"
