@@ -19,7 +19,7 @@ CXX        ?= clang++
 CXXFLAGS   ?= -std=c++17 -O2 -Wall -Wextra
 INCLUDES   := -I$(SLANG_DIR)/include -I$(EMITTED)
 
-KERNELS    := axpy
+KERNELS    := axpy saxpby jacobi
 SHADERS    := $(addprefix $(EMITTED)/,$(addsuffix _emit.cpp,$(KERNELS)))
 BINS       := $(addprefix $(EMITTED)/,$(addsuffix _test,$(KERNELS)))
 
