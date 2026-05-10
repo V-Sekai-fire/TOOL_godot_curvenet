@@ -77,20 +77,21 @@ int main() {
     }
     const std::vector<double> x0(nv, 0.0);
 
-    auto solve_one = [&](const std::vector<double> &b) {
-        return hscn::cg_hsc_with_guess(A, h, b, x0, 1000, 1e-8);
+    // Each thread holds its own VCycleScratch (shared-nothing).
+    auto solve_one = [&](const std::vector<double> &b,
+                            hscn::VCycleScratch &scr) {
+        return hscn::cg_hsc_with_guess_scratch(A, h, b, x0, 1000, 1e-8, scr);
     };
 
-    // Sequential baseline.
+    // Sequential baseline (single shared scratch).
     std::vector<std::vector<double>> xs_seq(k);
+    hscn::VCycleScratch scr_seq = hscn::make_scratch(h);
     const double t_seq = now_ms();
-    for (std::size_t c_ = 0; c_ < k; ++c_) xs_seq[c_] = solve_one(bs[c_]);
+    for (std::size_t c_ = 0; c_ < k; ++c_) xs_seq[c_] = solve_one(bs[c_], scr_seq);
     const double seq_ms = now_ms() - t_seq;
 
-    // Shared-nothing parallel: spawn k threads, each solves one RHS.
-    // Hierarchy and A are captured by const-reference; no shared
-    // mutable state. Each thread's stack-local scratch buffers
-    // are private. Standard data-parallel pattern.
+    // Shared-nothing parallel: each thread holds its own scratch.
+    // Hierarchy + A captured by const-ref; everything else thread-local.
     std::vector<std::vector<double>> xs_par(k);
     const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
     const double t_par = now_ms();
@@ -99,7 +100,8 @@ int main() {
         ts.reserve(k);
         for (std::size_t c_ = 0; c_ < k; ++c_) {
             ts.emplace_back([&, c_] {
-                xs_par[c_] = solve_one(bs[c_]);
+                hscn::VCycleScratch scr = hscn::make_scratch(h);
+                xs_par[c_] = solve_one(bs[c_], scr);
             });
         }
         for (auto &t : ts) t.join();

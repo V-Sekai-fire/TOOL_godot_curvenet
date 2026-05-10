@@ -62,7 +62,7 @@ int main() {
     std::printf("HSC V-cycle profile @ 5k (%zu levels)\n", h.graphs.size());
     std::printf("%-5s %-9s %-7s %-7s %-7s %-7s\n",
                   "lvl", "n", "smooth", "spmv", "restr", "prolong");
-    double tot_smooth = 0, tot_spmv = 0, tot_restr = 0, tot_prol = 0, tot_bot = 0;
+    double tot_smooth = 0, tot_spmv = 0, tot_restr = 0, tot_prol = 0, tot_bot = 0, tot_alloc = 0;
     for (std::size_t i = 0; i < prof.smooth_us.size(); ++i) {
         std::printf("%-5zu %-9zu %6.1f  %6.1f  %6.1f  %6.1f\n",
                       i, h.graphs[i].num_verts,
@@ -72,11 +72,12 @@ int main() {
         tot_spmv   += prof.spmv_us[i];
         tot_restr  += prof.restrict_us[i];
         tot_prol   += prof.prolong_us[i];
+        tot_alloc  += prof.alloc_us[i];
     }
     for (double v : prof.bottom_us) tot_bot += v;
-    std::printf("\ntotals (us): smooth=%.1f spmv=%.1f restrict=%.1f prolong=%.1f bottom=%.1f\n",
-                  tot_smooth, tot_spmv, tot_restr, tot_prol, tot_bot);
-    std::printf("V-cycle total: %.1f us\n",
-                  tot_smooth + tot_spmv + tot_restr + tot_prol + tot_bot);
+    std::printf("\ntotals (us): smooth=%.1f spmv=%.1f restrict=%.1f prolong=%.1f bottom=%.1f alloc=%.1f\n",
+                  tot_smooth, tot_spmv, tot_restr, tot_prol, tot_bot, tot_alloc);
+    std::printf("V-cycle total (sum of phases): %.1f us\n",
+                  tot_smooth + tot_spmv + tot_restr + tot_prol + tot_bot + tot_alloc);
     return 0;
 }

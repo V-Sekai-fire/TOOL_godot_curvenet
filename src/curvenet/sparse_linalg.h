@@ -44,6 +44,22 @@ inline std::vector<double> spmv(const SparseMatrixCSR &A,
 	return y;
 }
 
+// In-place SpMV: y is pre-allocated to A.rows; cleared and filled.
+// Used by HSC's v_cycle_apply_scratch to avoid per-V-cycle allocation.
+inline void spmv_into(const SparseMatrixCSR &A,
+                          const std::vector<double> &x,
+                          std::vector<double> &y) {
+    for (std::size_t i = 0; i < A.rows; ++i) {
+        double s = 0.0;
+        const int rs = A.row_ptr[i];
+        const int re = A.row_ptr[i + 1];
+        for (int p = rs; p < re; ++p) {
+            s += A.values[p] * x[A.col_idx[p]];
+        }
+        y[i] = s;
+    }
+}
+
 // Multi-RHS sparse mat-vec: Y[i, c] = Σ A[i, j] · X[j, c] for k columns.
 // Out is rows × k row-major. O(nnz(A) · k).
 inline std::vector<double> spmv_multi(const SparseMatrixCSR &A,
