@@ -329,6 +329,92 @@ inline std::vector<double> restrict_pt(const Prolongation &P,
     return y;
 }
 
+// A full HSC hierarchy: levels [0] = finest, [L-1] = coarsest. The
+// coarsest level is solved directly (small CG); intermediate
+// levels apply Jacobi smoothing + restriction + recursion +
+// prolongation + post-smoothing per the standard V-cycle.
+struct Hierarchy {
+    std::vector<Graph>                          graphs;     // length L
+    std::vector<sparse::SparseMatrixCSR>       mats;       // length L (= graph_to_csr per level)
+    std::vector<Prolongation>                   prolongs;   // length L-1; prolongs[i] goes level i+1 -> level i
+    std::vector<std::vector<double>>           diags;      // length L; cached diag(A_l) for Jacobi
+};
+
+inline Hierarchy build_hierarchy(const Graph &fine,
+                                     std::size_t coarsest_size = 64,
+                                     std::size_t max_levels = 16) {
+    Hierarchy h;
+    h.graphs.push_back(fine);
+    Graph cur = fine;
+    for (std::size_t lvl = 0; lvl + 1 < max_levels; ++lvl) {
+        if (cur.num_verts <= coarsest_size) break;
+        const CoarsenLevel lev = coarsen_one_level(cur);
+        if (lev.coarse.num_verts == 0 ||
+            lev.coarse.num_verts >= cur.num_verts) break;
+        h.prolongs.push_back(make_prolongation(cur, lev));
+        cur = lev.coarse;
+        h.graphs.push_back(cur);
+    }
+    for (const auto &g : h.graphs) {
+        h.mats.push_back(graph_to_csr(g));
+        h.diags.push_back(sparse::diagonal(h.mats.back()));
+    }
+    return h;
+}
+
+// Damped Jacobi smoother: x ← x + ω · D^{-1} · (b - A·x), nu sweeps.
+// ω = 2/3 is a common choice that contracts smooth modes well on
+// graph Laplacians.
+inline void jacobi_smooth(const sparse::SparseMatrixCSR &A,
+                              const std::vector<double> &diag,
+                              const std::vector<double> &b,
+                              std::vector<double> &x,
+                              std::size_t nu,
+                              double omega = 2.0 / 3.0) {
+    const std::size_t n = A.rows;
+    for (std::size_t s = 0; s < nu; ++s) {
+        const std::vector<double> Ax = sparse::spmv(A, x);
+        for (std::size_t i = 0; i < n; ++i) {
+            const double d = diag[i];
+            if (d != 0.0) x[i] += omega * (b[i] - Ax[i]) / d;
+        }
+    }
+}
+
+// One V-cycle apply: solve `A_level · x = b` approximately by
+//   pre-smooth -> restrict residual -> recurse -> prolong -> post-smooth
+// At the coarsest level uses sparse::cg as a direct-equivalent
+// (small system, converges quickly).
+inline std::vector<double> v_cycle_apply(const Hierarchy &h,
+                                              const std::vector<double> &b,
+                                              std::size_t level = 0,
+                                              std::size_t pre_smooth = 3,
+                                              std::size_t post_smooth = 3) {
+    const std::size_t L = h.graphs.size();
+    if (level + 1 == L) {
+        // Coarsest: small CG. The matrix is small (~64 rows by
+        // default) so 4·n iters at tol=1e-10 is exact-equivalent.
+        const std::size_t n = h.graphs[level].num_verts;
+        return sparse::cg(h.mats[level], b,
+                              std::max<std::size_t>(64, n * 4),
+                              1e-10);
+    }
+    const sparse::SparseMatrixCSR &A = h.mats[level];
+    const std::vector<double> &diag = h.diags[level];
+    std::vector<double> x(b.size(), 0.0);
+    jacobi_smooth(A, diag, b, x, pre_smooth);
+    const std::vector<double> Ax = sparse::spmv(A, x);
+    std::vector<double> r(b.size());
+    for (std::size_t i = 0; i < b.size(); ++i) r[i] = b[i] - Ax[i];
+    const std::vector<double> rc = restrict_pt(h.prolongs[level], r);
+    const std::vector<double> ec = v_cycle_apply(h, rc, level + 1,
+                                                       pre_smooth, post_smooth);
+    const std::vector<double> e = prolong(h.prolongs[level], ec);
+    for (std::size_t i = 0; i < b.size(); ++i) x[i] += e[i];
+    jacobi_smooth(A, diag, b, x, post_smooth);
+    return x;
+}
+
 } // namespace hsc
 } // namespace curvenet
 

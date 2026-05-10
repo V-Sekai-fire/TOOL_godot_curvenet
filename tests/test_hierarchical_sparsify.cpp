@@ -150,6 +150,52 @@ int main() {
         }
     });
 
+    // Hierarchy build on a path of 17 vertices: should produce
+    // multiple levels of coarsening.
+    ok &= rc::check("build_hierarchy on path-17 produces multiple levels", [] {
+        hsc::Graph g;
+        g.num_verts = 17;
+        for (int i = 0; i < 16; ++i) g.edges.push_back({ i, i + 1, 1.0 });
+        const auto h = hsc::build_hierarchy(g, /*coarsest_size=*/4);
+        RC_ASSERT(h.graphs.size() >= 2u);
+        RC_ASSERT(h.graphs[0].num_verts == 17u);
+        RC_ASSERT(h.graphs.back().num_verts <= 8u);
+        // Each level shrinks.
+        for (std::size_t l = 1; l < h.graphs.size(); ++l) {
+            RC_ASSERT(h.graphs[l].num_verts < h.graphs[l - 1].num_verts);
+        }
+    });
+
+    // V-cycle applied to b in range(A) recovers x with A·x ≈ b.
+    // On a small Laplacian, one V-cycle won't fully converge but
+    // residual must drop substantially from b's magnitude.
+    ok &= rc::check("V-cycle drops residual on path-9 Laplacian", [] {
+        hsc::Graph g;
+        g.num_verts = 9;
+        for (int i = 0; i < 8; ++i) g.edges.push_back({ i, i + 1, 1.0 });
+        const sp::SparseMatrixCSR A = hsc::graph_to_csr(g);
+        const auto h = hsc::build_hierarchy(g, /*coarsest_size=*/3);
+
+        // Build a zero-mean RHS in range(A). y = sin(0.1*i), b = A·y.
+        std::vector<double> y(g.num_verts);
+        for (std::size_t i = 0; i < g.num_verts; ++i) y[i] = std::sin(0.1 * static_cast<double>(i));
+        double mean = 0.0;
+        for (double v : y) mean += v;
+        mean /= y.size();
+        for (auto &v : y) v -= mean;
+        const std::vector<double> b = sp::spmv(A, y);
+
+        const std::vector<double> x = hsc::v_cycle_apply(h, b);
+        const std::vector<double> Ax = sp::spmv(A, x);
+        double r_norm = 0.0, b_norm = 0.0;
+        for (std::size_t i = 0; i < g.num_verts; ++i) {
+            r_norm += (Ax[i] - b[i]) * (Ax[i] - b[i]);
+            b_norm += b[i] * b[i];
+        }
+        // V-cycle should reduce residual by at least 5x compared to ||b||.
+        RC_ASSERT(std::sqrt(r_norm) < 0.2 * std::sqrt(b_norm));
+    });
+
     // P · 1_coarse = 1_fine (constant prolongs to constant).
     ok &= rc::check("P prolongs constant vectors to constant", [] {
         hsc::Graph g;
