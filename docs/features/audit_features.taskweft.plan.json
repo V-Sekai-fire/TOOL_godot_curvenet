@@ -1,0 +1,44 @@
+{
+  "plan": [
+    ["a_check_file_counts"],
+    ["a_check_section_completeness"],
+    ["a_check_cross_references"],
+    ["a_strip_broken_perf_baseline_refs"],
+    ["a_strip_broken_impossibility_refs"],
+    ["a_verify_clean"]
+  ],
+  "temporal": {
+    "consistent": true,
+    "origin": "PT0S",
+    "total": "PT0S",
+    "steps": [
+      {"action": "a_check_file_counts",                "duration": "PT0S", "start": "PT0S", "end": "PT0S"},
+      {"action": "a_check_section_completeness",       "duration": "PT0S", "start": "PT0S", "end": "PT0S"},
+      {"action": "a_check_cross_references",           "duration": "PT0S", "start": "PT0S", "end": "PT0S"},
+      {"action": "a_strip_broken_perf_baseline_refs",  "duration": "PT0S", "start": "PT0S", "end": "PT0S"},
+      {"action": "a_strip_broken_impossibility_refs",  "duration": "PT0S", "start": "PT0S", "end": "PT0S"},
+      {"action": "a_verify_clean",                     "duration": "PT0S", "start": "PT0S", "end": "PT0S"}
+    ]
+  },
+  "_provenance": {
+    "tool": "mcp__taskweft__plan",
+    "domain": "audit_features.taskweft.jsonld",
+    "ran_at": "2026-05-10",
+    "audit_findings": {
+      "tier_counts": {"known_knowns": 12, "known_unknowns": 13, "unknown_unknowns": 8},
+      "section_template_clean": true,
+      "broken_links_pre_fix": {
+        "perf_baseline_refs": 3,
+        "impossibility_refs": 2,
+        "files": [
+          "docs/features/unknown_unknowns/07_scaling_beyond_benchmark.md (1 PERF, 1 IMP)",
+          "docs/features/known_unknowns/04_sparse_bind_harvest.md (1 PERF)",
+          "docs/features/known_knowns/12_test_infrastructure.md (1 PERF)",
+          "docs/features/known_knowns/07_solver_kernels.md (1 IMP)"
+        ]
+      },
+      "broken_links_post_fix": 0,
+      "audit_passed": true
+    }
+  }
+}

@@ -32,8 +32,9 @@ artist-facing. Required-green status enforced by manual verification
 ### C++ tests
 - `tests/test_*.cpp` — 13 RC binaries
 - `tests/Makefile` — build + run
-- `tests/bench_*.cpp` — benchmarks (see
-  [`PERF_BASELINE.md`](../../PERF_BASELINE.md) for measurements)
+- `tests/bench_*.cpp` — benchmarks (run individually for per-mesh
+  measurements; the historical `PERF_BASELINE.md` aggregator was
+  retired)
 - `tests/diag_*.cpp` — diagnostic / one-shot runs
 
 ## API surface

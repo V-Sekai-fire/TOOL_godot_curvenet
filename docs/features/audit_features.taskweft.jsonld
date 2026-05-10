@@ -1,0 +1,169 @@
+{
+  "@context": {
+    "khr": "https://registry.khronos.org/glTF/extensions/2.0/KHR_interactivity/",
+    "domain": "khr:planning/domain/"
+  },
+  "@type": "domain:Definition",
+  "name": "audit_features_list",
+  "variables": [
+    {
+      "name": "tier_counts",
+      "init": {
+        "known_knowns": 12,
+        "known_unknowns": 13,
+        "unknown_unknowns": 8
+      }
+    },
+    {
+      "name": "broken_links",
+      "init": {
+        "perf_baseline_refs": 3,
+        "impossibility_refs": 2
+      }
+    },
+    {
+      "name": "section_template_clean",
+      "init": {
+        "all_files": false
+      }
+    },
+    {
+      "name": "audit_passed",
+      "init": {
+        "all_clean": false
+      }
+    }
+  ],
+  "actions": {
+    "a_check_file_counts": {
+      "params": [],
+      "body": [
+        {
+          "eval": {
+            "type": "math/eq",
+            "a": {"type": "pointer/get", "pointer": "/tier_counts/known_knowns"},
+            "b": 12
+          }
+        },
+        {
+          "eval": {
+            "type": "math/eq",
+            "a": {"type": "pointer/get", "pointer": "/tier_counts/known_unknowns"},
+            "b": 13
+          }
+        },
+        {
+          "eval": {
+            "type": "math/eq",
+            "a": {"type": "pointer/get", "pointer": "/tier_counts/unknown_unknowns"},
+            "b": 8
+          }
+        }
+      ]
+    },
+    "a_check_section_completeness": {
+      "params": [],
+      "body": [
+        {
+          "pointer/set": "/section_template_clean/all_files",
+          "value": true
+        }
+      ]
+    },
+    "a_check_cross_references": {
+      "params": [],
+      "body": [
+        {
+          "eval": {
+            "type": "math/gt",
+            "a": {"type": "pointer/get", "pointer": "/broken_links/perf_baseline_refs"},
+            "b": 0
+          }
+        }
+      ]
+    },
+    "a_strip_broken_perf_baseline_refs": {
+      "params": [],
+      "body": [
+        {
+          "eval": {
+            "type": "math/gt",
+            "a": {"type": "pointer/get", "pointer": "/broken_links/perf_baseline_refs"},
+            "b": 0
+          }
+        },
+        {
+          "pointer/set": "/broken_links/perf_baseline_refs",
+          "value": 0
+        }
+      ]
+    },
+    "a_strip_broken_impossibility_refs": {
+      "params": [],
+      "body": [
+        {
+          "eval": {
+            "type": "math/gt",
+            "a": {"type": "pointer/get", "pointer": "/broken_links/impossibility_refs"},
+            "b": 0
+          }
+        },
+        {
+          "pointer/set": "/broken_links/impossibility_refs",
+          "value": 0
+        }
+      ]
+    },
+    "a_verify_clean": {
+      "params": [],
+      "body": [
+        {
+          "eval": {
+            "type": "math/eq",
+            "a": {"type": "pointer/get", "pointer": "/broken_links/perf_baseline_refs"},
+            "b": 0
+          }
+        },
+        {
+          "eval": {
+            "type": "math/eq",
+            "a": {"type": "pointer/get", "pointer": "/broken_links/impossibility_refs"},
+            "b": 0
+          }
+        },
+        {
+          "eval": {
+            "type": "math/eq",
+            "a": {"type": "pointer/get", "pointer": "/section_template_clean/all_files"},
+            "b": true
+          }
+        },
+        {
+          "pointer/set": "/audit_passed/all_clean",
+          "value": true
+        }
+      ]
+    }
+  },
+  "methods": {
+    "audit_features_list": {
+      "params": [],
+      "alternatives": [
+        {
+          "name": "audit_then_fix_then_verify",
+          "subtasks": [
+            ["a_check_file_counts"],
+            ["a_check_section_completeness"],
+            ["a_check_cross_references"],
+            ["a_strip_broken_perf_baseline_refs"],
+            ["a_strip_broken_impossibility_refs"],
+            ["a_verify_clean"]
+          ]
+        }
+      ]
+    }
+  },
+  "tasks": [
+    ["audit_features_list"]
+  ]
+}

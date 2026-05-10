@@ -74,6 +74,5 @@ C++-internal. Used by the deformer:
   and [08 §6 solve](08_degoes22_solve.md)
 - ICC opt-in toggled via `CurveNetDeformer3D::use_incomplete_cholesky`
 - HSC variants and Schwarz-family preconditioners ruled out across
-  ~100 loops — see [`IMPOSSIBILITY.md`](../../IMPOSSIBILITY.md) and
-  the
+  ~100 loops — retired-trajectory record lives in the
   [archive repo](https://github.com/V-Sekai-fire/TOOL_godot_curvenet_archive)

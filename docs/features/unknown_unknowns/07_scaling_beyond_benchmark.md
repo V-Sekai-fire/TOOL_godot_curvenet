@@ -5,9 +5,10 @@
 Largest tested mesh is **Mire body at 81 k vertices**. Behavior at
 200 k / 500 k / 1 M is unknown. Pre-100-loops trajectory ruled out
 several iterative preconditioners *because* they failed at 81 k —
-[`IMPOSSIBILITY.md`](../../IMPOSSIBILITY.md) is specifically about
-this scale. We don't know how the *current production path* (sparse
-PCG + ICC opt-in + DDM) holds up beyond 81 k.
+that retired-trajectory record now lives in the
+[archive repo](https://github.com/V-Sekai-fire/TOOL_godot_curvenet_archive).
+We don't know how the *current production path* (sparse PCG + ICC
+opt-in + DDM) holds up beyond 81 k.
 
 ## What might break
 
@@ -52,5 +53,6 @@ PCG + ICC opt-in + DDM) holds up beyond 81 k.
   and may be tractable.
 - A "scale tier" property on the deformer: small / medium / large
   switches between dense / sparse / GPU paths.
-- Measurements added to [`PERF_BASELINE.md`](../../PERF_BASELINE.md)
-  as discoveries surface.
+- Measurements logged into the project's perf record (PERF_BASELINE
+  was retired alongside the trajectory docs; new perf measurements
+  live in commit messages and benchmark output).
