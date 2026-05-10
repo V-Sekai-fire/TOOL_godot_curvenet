@@ -4,7 +4,7 @@ defaultTargets = ["Curvenet", "LeanGltf"]
 [[require]]
 name = "LeanSlang"
 git = "https://github.com/V-Sekai-fire/lean-slang.git"
-rev = "v0.0.3"
+rev = "v0.0.4"
 
 [[lean_lib]]
 name = "Curvenet"

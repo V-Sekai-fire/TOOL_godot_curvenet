@@ -6,6 +6,7 @@ import Curvenet.SlangCodegen.SaxpbyMulti
 import Curvenet.SlangCodegen.Jacobi
 import Curvenet.SlangCodegen.JacobiMulti
 import Curvenet.SlangCodegen.Spmv
+import Curvenet.SlangCodegen.SpmvMulti
 
 /-!
 # `Curvenet.SlangCodegen` — Slang shader codegen umbrella
