@@ -19,6 +19,9 @@ lean_exe axpy_validate where
 lean_exe mire_to_gltf where
   root := `MireToGltf
 
+lean_exe gltf_inspect where
+  root := `GltfInspect
+
 extern_lib axpy_native pkg := do
   let workDir := pkg.dir / "native"
   let oFile  := pkg.buildDir / "native" / "axpy_shim.o"

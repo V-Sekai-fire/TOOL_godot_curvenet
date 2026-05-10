@@ -1,5 +1,7 @@
+import Lean.Data.Json
+
 /-!
-# Minimal JSON encoder for `LeanGltf`
+# Minimal JSON encoder + parser-bridge for `LeanGltf`
 
 A pragmatic JSON value type sufficient for emitting glTF 2.0 documents.
 We avoid `Lean.Data.Json` (which would pull in the Lean elaborator) and
@@ -103,5 +105,30 @@ def ofIntArr (xs : Array Nat) : Value :=
 
 def ofFloatArr (xs : Array Float) : Value :=
   .arr (xs.map (fun f => .num f))
+
+/-! ## Parser — wraps `Lean.Json.parse`
+
+`render` is hand-rolled to control float formatting precisely, but
+parsing leans on `Lean.Json.parse` and converts into our `Value`.
+That gives us RFC 8259 escape / number handling for free.
+-/
+
+private partial def ofLeanJson : Lean.Json → Value
+  | .null      => .null
+  | .bool b    => .bool b
+  | .num n     =>
+    if n.exponent = 0 then .int n.mantissa
+    else .num n.toFloat
+  | .str s     => .str s
+  | .arr xs    => .arr (xs.map ofLeanJson)
+  | .obj kvs   =>
+    let entries : Array (String × Value) :=
+      kvs.foldl (init := #[]) (fun acc k v => acc.push (k, ofLeanJson v))
+    .obj entries
+
+/-- Parse a JSON document into a `Value`. Error string carries
+    `Lean.Json.parse`'s position info on failure. -/
+def parse (src : String) : Except String Value :=
+  Lean.Json.parse src |>.map ofLeanJson
 
 end LeanGltf.JSON
