@@ -56,6 +56,20 @@ env.Append(CPPPATH=["src/"])
 # editor plugins).
 sources = Glob("src/*.cpp")
 
+# Template builds (template_debug, template_release) drop editor sources
+# entirely. Defining TOOLS_ENABLED for the editor target lets shared
+# files (`register_types.cpp`, `vertex_handles_3d.cpp`) include editor
+# headers + register editor-tier classes when, and only when, the
+# binary will run in an editor process.
+is_editor = env["target"] == "editor"
+if is_editor:
+    env.Append(CPPDEFINES=["TOOLS_ENABLED"])
+else:
+    sources = [
+        s for s in sources
+        if "editor_plugin" not in str(s) and "gizmo_plugin" not in str(s)
+    ]
+
 if env["target"] in ["editor", "template_debug"]:
     try:
         doc_data = env.GodotCPPDocData(

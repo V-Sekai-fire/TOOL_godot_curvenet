@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: MIT
 #include "vertex_handles_3d.h"
 
+#ifdef TOOLS_ENABLED
 #include <godot_cpp/classes/editor_interface.hpp>
 #include <godot_cpp/classes/editor_selection.hpp>
+#endif
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -70,8 +72,10 @@ TypedArray<PackedVector3Array> VertexHandles3D::get_point_arrays() const {
 void VertexHandles3D::_ready() {
 	refresh_point_arrays();
 
+#ifdef TOOLS_ENABLED
 	// Editor-only: refresh on selection change. EditorInterface only exists
-	// when running inside the editor.
+	// when running inside the editor — both compile-time (template builds
+	// drop the headers) and runtime (`is_editor_hint()` returns false).
 	if (Engine::get_singleton()->is_editor_hint()) {
 		EditorInterface *ei = EditorInterface::get_singleton();
 		if (ei != nullptr) {
@@ -81,6 +85,7 @@ void VertexHandles3D::_ready() {
 			}
 		}
 	}
+#endif
 
 	// Wire to a sibling CurveNetDeformer3D so handle moves trigger redeform.
 	Node *deformer = find_curvenet_deformer();
@@ -103,8 +108,10 @@ void VertexHandles3D::set_point(int p_surface, int p_point_idx, const Vector3 &p
 }
 
 void VertexHandles3D::refresh_point_arrays() {
+#ifdef TOOLS_ENABLED
 	// Only refresh in the editor when this node is selected (matches GDScript
-	// semantics so we don't clobber edits made elsewhere).
+	// semantics so we don't clobber edits made elsewhere). Template builds
+	// always refresh — there's no editor selection state to consult.
 	if (Engine::get_singleton()->is_editor_hint()) {
 		EditorInterface *ei = EditorInterface::get_singleton();
 		if (ei == nullptr) {
@@ -127,6 +134,7 @@ void VertexHandles3D::refresh_point_arrays() {
 			return;
 		}
 	}
+#endif
 
 	Ref<Mesh> current = get_mesh();
 	if (current.is_null()) {
