@@ -1,0 +1,28 @@
+{
+  "plan": [
+    ["a_remove_features_md_refs"],
+    ["a_rewrite_todo_paths_to_known_unknowns"],
+    ["a_fix_perf_baseline_relative_path"],
+    ["a_propagate_known_rename"],
+    ["a_verify_no_broken_refs"]
+  ],
+  "temporal": {
+    "consistent": true,
+    "origin": "PT0S",
+    "total": "PT0S",
+    "steps": [
+      {"action": "a_remove_features_md_refs",                "duration": "PT0S", "start": "PT0S", "end": "PT0S"},
+      {"action": "a_rewrite_todo_paths_to_known_unknowns",   "duration": "PT0S", "start": "PT0S", "end": "PT0S"},
+      {"action": "a_fix_perf_baseline_relative_path",        "duration": "PT0S", "start": "PT0S", "end": "PT0S"},
+      {"action": "a_propagate_known_rename",                 "duration": "PT0S", "start": "PT0S", "end": "PT0S"},
+      {"action": "a_verify_no_broken_refs",                  "duration": "PT0S", "start": "PT0S", "end": "PT0S"}
+    ]
+  },
+  "_provenance": {
+    "tool": "mcp__taskweft__plan",
+    "domain": "audit.taskweft.jsonld",
+    "ran_at": "2026-05-10",
+    "matches_executed_sequence": true,
+    "executed_via": "sed/perl/Edit (pre-MCP-reconnect); planner output verifies the same decomposition"
+  }
+}
