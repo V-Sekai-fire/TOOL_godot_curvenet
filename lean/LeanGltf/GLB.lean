@@ -78,4 +78,66 @@ def emit (doc : LeanGltf.Document) (bin : ByteArray) : ByteArray :=
     pushU32LE (pushU32LE (pushU32LE ByteArray.empty magicGLB) 2) totalLength.toUInt32
   header ++ jsonChunk ++ binChunk
 
+/-! ## Reader -/
+
+private def readU32LE (bs : ByteArray) (off : Nat) : Option UInt32 :=
+  if off + 4 > bs.size then none
+  else
+    let b0 := bs[off]!.toUInt32
+    let b1 := bs[off+1]!.toUInt32
+    let b2 := bs[off+2]!.toUInt32
+    let b3 := bs[off+3]!.toUInt32
+    some (b0 ||| (b1 <<< 8) ||| (b2 <<< 16) ||| (b3 <<< 24))
+
+private def slice (bs : ByteArray) (off len : Nat) : ByteArray :=
+  bs.extract off (off + len)
+
+/-- Parse a GLB byte stream into (JSON string, BIN chunk).
+    BIN chunk is empty when the file has no second chunk. Errors on
+    bad magic, version, length, or chunk types. -/
+def parse (bs : ByteArray) : Except String (String × ByteArray) := do
+  if bs.size < 12 then throw "glb: header < 12 bytes"
+  let magic ← match readU32LE bs 0 with
+    | some n => pure n
+    | none   => throw "glb: short read at magic"
+  if magic ≠ magicGLB then throw "glb: bad magic"
+  let version ← match readU32LE bs 4 with
+    | some n => pure n
+    | none   => throw "glb: short read at version"
+  if version ≠ 2 then throw s!"glb: unsupported version {version}"
+  let totalLen ← match readU32LE bs 8 with
+    | some n => pure n.toNat
+    | none   => throw "glb: short read at totalLength"
+  if totalLen > bs.size then throw "glb: declared length exceeds bytes"
+
+  -- Chunk 0: must be JSON.
+  let chunk0Len ← match readU32LE bs 12 with
+    | some n => pure n.toNat
+    | none   => throw "glb: short read at chunk-0 length"
+  let chunk0Type ← match readU32LE bs 16 with
+    | some n => pure n
+    | none   => throw "glb: short read at chunk-0 type"
+  if chunk0Type ≠ chunkJSON then throw "glb: chunk 0 is not JSON"
+  let chunk0Data := slice bs 20 chunk0Len
+  -- The writer appends 0x20 (space) padding to align to 4 bytes; that's
+  -- valid JSON whitespace, so we hand the unstripped string straight to
+  -- the parser without `trim` (which is being deprecated to a Slice
+  -- return type in newer Lean).
+  let json := (String.fromUTF8? chunk0Data).getD ""
+
+  -- Chunk 1 (optional): BIN.
+  let after0 := 20 + chunk0Len
+  if after0 ≥ totalLen then
+    return (json, ByteArray.empty)
+  if after0 + 8 > bs.size then throw "glb: short read at chunk-1 header"
+  let chunk1Len ← match readU32LE bs after0 with
+    | some n => pure n.toNat
+    | none   => throw "glb: short read at chunk-1 length"
+  let chunk1Type ← match readU32LE bs (after0 + 4) with
+    | some n => pure n
+    | none   => throw "glb: short read at chunk-1 type"
+  if chunk1Type ≠ chunkBIN then throw "glb: chunk 1 is not BIN"
+  let bin := slice bs (after0 + 8) chunk1Len
+  return (json, bin)
+
 end LeanGltf.GLB
