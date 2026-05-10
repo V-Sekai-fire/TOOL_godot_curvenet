@@ -1,0 +1,172 @@
+{
+  "@context": {
+    "khr": "https://registry.khronos.org/glTF/extensions/2.0/KHR_interactivity/",
+    "domain": "khr:planning/domain/"
+  },
+  "@type": "domain:Definition",
+  "name": "docs_features_audit_fix",
+  "variables": [
+    {
+      "name": "broken_refs",
+      "init": {
+        "features_md": 12,
+        "todo_path": 6,
+        "perf_baseline_path": 1,
+        "known_renamed": 2
+      }
+    },
+    {
+      "name": "verified",
+      "init": {
+        "all_clean": false
+      }
+    }
+  ],
+  "actions": {
+    "a_remove_features_md_refs": {
+      "params": [],
+      "body": [
+        {
+          "eval": {
+            "type": "math/gt",
+            "a": {
+              "type": "pointer/get",
+              "pointer": "/broken_refs/features_md"
+            },
+            "b": 0
+          }
+        },
+        {
+          "pointer/set": "/broken_refs/features_md",
+          "value": 0
+        }
+      ]
+    },
+    "a_rewrite_todo_paths_to_known_unknowns": {
+      "params": [],
+      "body": [
+        {
+          "eval": {
+            "type": "math/gt",
+            "a": {
+              "type": "pointer/get",
+              "pointer": "/broken_refs/todo_path"
+            },
+            "b": 0
+          }
+        },
+        {
+          "pointer/set": "/broken_refs/todo_path",
+          "value": 0
+        }
+      ]
+    },
+    "a_fix_perf_baseline_relative_path": {
+      "params": [],
+      "body": [
+        {
+          "eval": {
+            "type": "math/gt",
+            "a": {
+              "type": "pointer/get",
+              "pointer": "/broken_refs/perf_baseline_path"
+            },
+            "b": 0
+          }
+        },
+        {
+          "pointer/set": "/broken_refs/perf_baseline_path",
+          "value": 0
+        }
+      ]
+    },
+    "a_propagate_known_rename": {
+      "params": [],
+      "body": [
+        {
+          "eval": {
+            "type": "math/gt",
+            "a": {
+              "type": "pointer/get",
+              "pointer": "/broken_refs/known_renamed"
+            },
+            "b": 0
+          }
+        },
+        {
+          "pointer/set": "/broken_refs/known_renamed",
+          "value": 0
+        }
+      ]
+    },
+    "a_verify_no_broken_refs": {
+      "params": [],
+      "body": [
+        {
+          "eval": {
+            "type": "math/eq",
+            "a": {
+              "type": "pointer/get",
+              "pointer": "/broken_refs/features_md"
+            },
+            "b": 0
+          }
+        },
+        {
+          "eval": {
+            "type": "math/eq",
+            "a": {
+              "type": "pointer/get",
+              "pointer": "/broken_refs/todo_path"
+            },
+            "b": 0
+          }
+        },
+        {
+          "eval": {
+            "type": "math/eq",
+            "a": {
+              "type": "pointer/get",
+              "pointer": "/broken_refs/perf_baseline_path"
+            },
+            "b": 0
+          }
+        },
+        {
+          "eval": {
+            "type": "math/eq",
+            "a": {
+              "type": "pointer/get",
+              "pointer": "/broken_refs/known_renamed"
+            },
+            "b": 0
+          }
+        },
+        {
+          "pointer/set": "/verified/all_clean",
+          "value": true
+        }
+      ]
+    }
+  },
+  "methods": {
+    "audit_and_fix": {
+      "params": [],
+      "alternatives": [
+        {
+          "name": "fix_all_then_verify",
+          "subtasks": [
+            ["a_remove_features_md_refs"],
+            ["a_rewrite_todo_paths_to_known_unknowns"],
+            ["a_fix_perf_baseline_relative_path"],
+            ["a_propagate_known_rename"],
+            ["a_verify_no_broken_refs"]
+          ]
+        }
+      ]
+    }
+  },
+  "tasks": [
+    ["audit_and_fix"]
+  ]
+}
