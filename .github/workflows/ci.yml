@@ -7,11 +7,6 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Opt every actions/* invocation into Node 24 ahead of the September 2026
-# Node 20 removal: silences the deprecation warning on cache@v4 / checkout@v4.
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   validate:
     # macos-14 (Apple Silicon) covers everything: Lean's lake build, the
@@ -21,10 +16,10 @@ jobs:
     # GPU paravirtualization, so we stay on macos-14 / macos-latest.
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Cache .elan + lake-packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.elan
@@ -39,7 +34,7 @@ jobs:
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
       - name: Cache Slang toolchain
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: bin/.slang
           # OS + arch is essential here — slangc is a native binary, so a
