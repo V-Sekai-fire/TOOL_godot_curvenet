@@ -1,0 +1,8 @@
+.DS_Store
+.vscode/
+build/
+external/optix
+
+.vs/
+
+*.nsys-rep

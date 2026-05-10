@@ -1,0 +1,145 @@
+{
+    "version": 6,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 20,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "default",
+            "description": "Default build using Ninja Multi-Config generator",
+            "generator": "Ninja Multi-Config",
+            "binaryDir": "${sourceDir}/build"
+        },
+        {
+            "name": "gcc",
+            "inherits": "default",
+            "description": "Ninja Multi-Config generator with gcc",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "gcc",
+                "CMAKE_CXX_COMPILER": "g++"
+            }
+        },
+        {
+            "name": "clang",
+            "inherits": "default",
+            "description": "Ninja Multi-Config generator with Clang",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++"
+            }
+        },
+        {
+            "name": "msvc-base",
+            "hidden": true,
+            "inherits": "default",
+            "description": "Options specific for MSVC",
+            "cacheVariables": {
+                "CMAKE_C_FLAGS_INIT": "-D_ITERATOR_DEBUG_LEVEL=0 /MP",
+                "CMAKE_CXX_FLAGS_INIT": "-D_ITERATOR_DEBUG_LEVEL=0 /MP"
+            }
+        },
+        {
+            "name": "msvc",
+            "inherits": "msvc-base",
+            "description": "Ninja Multi-Config generator with MSVC",
+            "generator": "Ninja Multi-Config",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "cl",
+                "CMAKE_CXX_COMPILER": "cl"
+            },
+            "architecture": {
+                "value": "x64",
+                "strategy": "external"
+            },
+            "vendor": {
+                "microsoft.com/VisualStudioSettings/CMake/1.0": {
+                    "hostOS": [
+                        "Windows"
+                    ]
+                }
+            }
+        },
+        {
+            "name": "vs2019",
+            "inherits": "msvc-base",
+            "description": "Visual Studio 2019 project",
+            "generator": "Visual Studio 16 2019"
+        },
+        {
+            "name": "vs2022",
+            "inherits": "msvc-base",
+            "description": "Visual Studio 2022 project",
+            "generator": "Visual Studio 17 2022"
+        },
+        {
+            "name": "vs2026",
+            "inherits": "msvc-base",
+            "description": "Visual Studio 2026 project",
+            "generator": "Visual Studio 18 2026"
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "Debug",
+            "configurePreset": "default",
+            "configuration": "Debug"
+        },
+        {
+            "name": "Release",
+            "configurePreset": "default",
+            "configuration": "Release"
+        },
+        {
+            "name": "RelWithDebInfo",
+            "configurePreset": "default",
+            "configuration": "RelWithDebInfo"
+        },
+        {
+            "name": "gcc-Debug",
+            "configurePreset": "gcc",
+            "configuration": "Debug"
+        },
+        {
+            "name": "gcc-Release",
+            "configurePreset": "gcc",
+            "configuration": "Release"
+        },
+        {
+            "name": "gcc-RelWithDebInfo",
+            "configurePreset": "gcc",
+            "configuration": "RelWithDebInfo"
+        },
+        {
+            "name": "clang-Debug",
+            "configurePreset": "clang",
+            "configuration": "Debug"
+        },
+        {
+            "name": "clang-Release",
+            "configurePreset": "clang",
+            "configuration": "Release"
+        },
+        {
+            "name": "clang-RelWithDebInfo",
+            "configurePreset": "clang",
+            "configuration": "RelWithDebInfo"
+        },
+        {
+            "name": "msvc-Debug",
+            "configurePreset": "msvc",
+            "configuration": "Debug"
+        },
+        {
+            "name": "msvc-Release",
+            "configurePreset": "msvc",
+            "configuration": "Release"
+        },
+        {
+            "name": "msvc-RelWithDebInfo",
+            "configurePreset": "msvc",
+            "configuration": "RelWithDebInfo"
+        }
+    ]
+}

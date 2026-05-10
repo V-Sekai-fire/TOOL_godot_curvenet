@@ -1,54 +1,56 @@
 # Vendor notes — Slang
 
-This is an in-tree vendor of [shader-slang/slang](https://github.com/shader-slang/slang)
+In-tree vendor of [shader-slang/slang](https://github.com/shader-slang/slang)
 following the project's existing pattern (`thirdparty/godot-cpp/`,
 `thirdparty/meshoptimizer/`, `thirdparty/rapidcheck/`). MIT-licensed
 (see `LICENSE`).
 
 ## Why
 
-The xr-grid port replaces the Godot GDExtension integration with a
-Lean-driven Slang shader-codegen pipeline:
-
-- Lean modules under `lean/Curvenet/` emit `.slang` source for the
-  DDM matvec runtime kernel and the bind-time harvest.
-- `slangc` lowers each `.slang` to SPIR-V at bind time; the cached
-  SPIR-V is mmap'd by the xr-grid Vulkan compute dispatcher.
-- No Godot dependency — the runtime library is self-contained.
+Brings Slang as the shader compiler for the Godot deformer's runtime
+DDM matvec path. The build pipeline mirrors
+[DevPrice/godot-slang](https://github.com/DevPrice/godot-slang)
+(`build_slang.py` invokes CMake on this directory, produces a
+shared lib, scons links the GDExtension against it).
 
 ## Vendored revision
 
-`63207ece82420eeb0f9a606b0739b7d8534a6662` (cloned shallow on 2026-05-10).
+`63207ece82420eeb0f9a606b0739b7d8534a6662` (cloned shallow with
+`--recurse-submodules --shallow-submodules`).
 
 ## What was trimmed from the upstream tree
 
 - `tests/` (~21 MB, internal test fixtures)
-- `docs/`, `examples/`, `extras/`, `docker/`, `typings/` —
-  documentation and bindings we don't consume.
+- `docs/`, `extras/`, `docker/`, `typings/` — documentation we don't consume.
 - `flake.lock`, `flake.nix`, `REVIEW.md`, `CONTRIBUTING.md`,
-  `CODE_OF_CONDUCT.md`, `REUSE.toml`, `CLAUDE.md` — upstream-only
-  metadata.
-- `.git/`, `.github/` — clone provenance.
+  `CODE_OF_CONDUCT.md`, `REUSE.toml`, `CLAUDE.md` — upstream-only metadata.
+- `.git/`, `.github/` (top-level + each submodule).
 
 What stays: `source/`, `include/`, `prelude/`, `tools/` (slangc CLI),
-`external/`, `cmake/`, `CMakeLists.txt`, `CMakePresets.json`, the
-license files, and `slang-tag-version.h.in`.
+`examples/` (CMake unconditionally `add_subdirectory()`s it; cheap to keep),
+`external/` with all submodule contents intact (glslang, spirv-tools,
+spirv-headers, vulkan-headers, slang-rhi, etc.), `cmake/`,
+`CMakeLists.txt`, `CMakePresets.json`, the license files, and
+`slang-tag-version.h.in`.
 
-Total on-disk: ~30 MB.
+Total on-disk: ~199 MB.
 
 ## Updating
 
-Re-run the trim:
-```
-cd /tmp && rm -rf slang-probe
-git clone --depth 1 https://github.com/shader-slang/slang.git slang-probe
-cd slang-probe
-rm -rf tests docs examples extras docker typings \
+```sh
+cd /tmp && rm -rf slang-fresh
+git clone --depth 1 --recurse-submodules --shallow-submodules \
+  https://github.com/shader-slang/slang.git slang-fresh
+cd slang-fresh
+rm -rf tests docs extras docker typings \
        flake.lock flake.nix REVIEW.md CONTRIBUTING.md \
-       CODE_OF_CONDUCT.md REUSE.toml CLAUDE.md .git .github
+       CODE_OF_CONDUCT.md REUSE.toml CLAUDE.md \
+       .git .github
+find external -name '.git' -exec rm -rf {} + 2>/dev/null
+find external -name '.github' -type d -exec rm -rf {} + 2>/dev/null
 cd ..
 rm -rf <repo>/thirdparty/slang
-mv slang-probe <repo>/thirdparty/slang
+mv slang-fresh <repo>/thirdparty/slang
 ```
 
 Update the vendored revision line above with the new commit SHA.
