@@ -84,6 +84,55 @@ def shader : SlangShaderModule :=
         , .assign (.index (.var "ok") (.var "i")) (.var "valid")
         , .ret none ] }] }
 
+def expected : String :=
+"struct HalfedgeParams {
+  uint he_count;
+  uint vertex_count;
+  uint face_count;
+};
+
+[[vk::binding(0, 0)]]
+ConstantBuffer<HalfedgeParams> params;
+[[vk::binding(1, 0)]]
+StructuredBuffer<int> targets;
+[[vk::binding(2, 0)]]
+StructuredBuffer<int> twins;
+[[vk::binding(3, 0)]]
+StructuredBuffer<int> nexts;
+[[vk::binding(4, 0)]]
+StructuredBuffer<int> faces;
+[[vk::binding(5, 0)]]
+RWStructuredBuffer<uint> ok;
+
+[shader(\"compute\")] [numthreads(256, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+  uint i = tid.x;
+  if ((i >= params.he_count)) {
+    return;
+  }
+  int tgt = targets[i];
+  int tw = twins[i];
+  int nx = nexts[i];
+  int fc = faces[i];
+  uint valid = 1u;
+  if (((tgt < 0u) || (uint(tgt) >= params.vertex_count))) {
+    valid = 0u;
+  }
+  if (((nx < 0u) || (uint(nx) >= params.he_count))) {
+    valid = 0u;
+  }
+  if (((tw >= 0u) && (uint(tw) >= params.he_count))) {
+    valid = 0u;
+  }
+  if (((fc >= 0u) && (uint(fc) >= params.face_count))) {
+    valid = 0u;
+  }
+  ok[i] = valid;
+  return;
+}"
+
+example : LeanSlang.emit shader = expected := by native_decide
+
 example : shader.entryPointName = "main" := by native_decide
 
 end Curvenet.SlangCodegen.Halfedge

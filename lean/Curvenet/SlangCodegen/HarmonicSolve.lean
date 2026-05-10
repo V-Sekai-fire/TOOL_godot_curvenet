@@ -66,6 +66,44 @@ def shader : SlangShaderModule :=
             (.bin "-" (.index (.var "b") (.var "i")) (.var "Lphi"))
         , .ret none ] }] }
 
+def expected : String :=
+"struct HarmonicParams {
+  uint n;
+};
+
+[[vk::binding(0, 0)]]
+ConstantBuffer<HarmonicParams> params;
+[[vk::binding(1, 0)]]
+StructuredBuffer<int> rowPtr;
+[[vk::binding(2, 0)]]
+StructuredBuffer<int> colIdx;
+[[vk::binding(3, 0)]]
+StructuredBuffer<float> values;
+[[vk::binding(4, 0)]]
+StructuredBuffer<float> phi;
+[[vk::binding(5, 0)]]
+StructuredBuffer<float> b;
+[[vk::binding(6, 0)]]
+RWStructuredBuffer<float> r;
+
+[shader(\"compute\")] [numthreads(256, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+  uint i = tid.x;
+  if ((i >= params.n)) {
+    return;
+  }
+  uint rs = uint(rowPtr[i]);
+  uint re = uint(rowPtr[(i + 1u)]);
+  float Lphi = 0.000000;
+  for (uint p = rs; p < re; ++p) {
+    Lphi = fma(values[p], phi[uint(colIdx[p])], Lphi);
+  }
+  r[i] = (b[i] - Lphi);
+  return;
+}"
+
+example : LeanSlang.emit shader = expected := by native_decide
+
 example : shader.entryPointName = "main" := by native_decide
 
 end Curvenet.SlangCodegen.HarmonicSolve

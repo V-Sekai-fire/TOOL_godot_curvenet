@@ -137,6 +137,72 @@ def shader : SlangShaderModule :=
       , ⟨"F",       .rwBuf floatTy,         Semantic.none, some 5, some 0, .qIn⟩ ]
   , functions := [skew3, smallest_rotation, mainEntry] }
 
+def expected : String :=
+"struct SegGradParams {
+  uint num_segments;
+};
+
+[[vk::binding(0, 0)]]
+ConstantBuffer<SegGradParams> params;
+[[vk::binding(1, 0)]]
+StructuredBuffer<float3> rest_p;
+[[vk::binding(2, 0)]]
+StructuredBuffer<float3> rest_q;
+[[vk::binding(3, 0)]]
+StructuredBuffer<float3> posed_p;
+[[vk::binding(4, 0)]]
+StructuredBuffer<float3> posed_q;
+[[vk::binding(5, 0)]]
+RWStructuredBuffer<float> F;
+
+float3x3 skew3(float3 v) {
+  return float3x3(0.000000, (-v.z), v.y, v.z, 0.000000, (-v.x), (-v.y), v.x, 0.000000);
+}
+
+float3x3 smallest_rotation(float3 fromV, float3 toV) {
+  float3 cv = cross(fromV, toV);
+  float ct = dot(fromV, toV);
+  float3x3 K = skew3(cv);
+  float3x3 K2 = mul(K, K);
+  float denom = (1.000000 + ct);
+  float invD = ((abs(denom) < 0.000000) ? 0.000000 : (1.000000 / denom));
+  return ((float3x3(1.000000, 0.000000, 0.000000, 0.000000, 1.000000, 0.000000, 0.000000, 0.000000, 1.000000) + K) + (invD * K2));
+}
+
+[shader(\"compute\")] [numthreads(64, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+  uint t = tid.x;
+  if ((t >= params.num_segments)) {
+    return;
+  }
+  float3 rp = rest_p[t];
+  float3 rq = rest_q[t];
+  float3 pp = posed_p[t];
+  float3 pq = posed_q[t];
+  float3 rd = (rq - rp);
+  float3 pd = (pq - pp);
+  float rl = length(rd);
+  float pl = length(pd);
+  float ratio = ((rl < 0.000000) ? 0.000000 : (pl / rl));
+  float3 rt = ((rl < 0.000000) ? float3(0.000000, 0.000000, 0.000000) : (rd / rl));
+  float3 pt = ((pl < 0.000000) ? float3(0.000000, 0.000000, 0.000000) : (pd / pl));
+  float3x3 R = smallest_rotation(rt, pt);
+  float3x3 Fmat = (ratio * R);
+  uint base = (t * 9u);
+  F[(base + 0u)] = Fmat._m00;
+  F[(base + 1u)] = Fmat._m01;
+  F[(base + 2u)] = Fmat._m02;
+  F[(base + 3u)] = Fmat._m10;
+  F[(base + 4u)] = Fmat._m11;
+  F[(base + 5u)] = Fmat._m12;
+  F[(base + 6u)] = Fmat._m20;
+  F[(base + 7u)] = Fmat._m21;
+  F[(base + 8u)] = Fmat._m22;
+  return;
+}"
+
+example : LeanSlang.emit shader = expected := by native_decide
+
 example : shader.entryPointName = "main" := by native_decide
 
 end Curvenet.SlangCodegen.SegmentGradient

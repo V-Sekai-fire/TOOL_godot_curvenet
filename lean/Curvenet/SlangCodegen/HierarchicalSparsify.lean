@@ -62,6 +62,39 @@ def shader : SlangShaderModule :=
         , .assign (.index (.var "coarse_vals") (.var "c")) (.var "acc")
         , .ret none ] }] }
 
+def expected : String :=
+"struct HSparsifyParams {
+  uint num_coarse;
+  uint num_fine;
+};
+
+[[vk::binding(0, 0)]]
+ConstantBuffer<HSparsifyParams> params;
+[[vk::binding(1, 0)]]
+StructuredBuffer<int> parent;
+[[vk::binding(2, 0)]]
+StructuredBuffer<float> fine_vals;
+[[vk::binding(3, 0)]]
+RWStructuredBuffer<float> coarse_vals;
+
+[shader(\"compute\")] [numthreads(256, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+  uint c = tid.x;
+  if ((c >= params.num_coarse)) {
+    return;
+  }
+  float acc = 0.000000;
+  for (uint i = 0u; i < params.num_fine; ++i) {
+    if ((uint(parent[i]) == c)) {
+      acc = (acc + fine_vals[i]);
+    }
+  }
+  coarse_vals[c] = acc;
+  return;
+}"
+
+example : LeanSlang.emit shader = expected := by native_decide
+
 example : shader.entryPointName = "main" := by native_decide
 
 end Curvenet.SlangCodegen.HierarchicalSparsify

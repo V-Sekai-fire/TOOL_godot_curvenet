@@ -57,6 +57,40 @@ def shader : SlangShaderModule :=
         , .assign (.index (.var "twins") (.var "i")) (.var "found")
         , .ret none ] }] }
 
+def expected : String :=
+"struct HBuilderParams {
+  uint he_count;
+};
+
+[[vk::binding(0, 0)]]
+ConstantBuffer<HBuilderParams> params;
+[[vk::binding(1, 0)]]
+StructuredBuffer<int> sources;
+[[vk::binding(2, 0)]]
+StructuredBuffer<int> targets;
+[[vk::binding(3, 0)]]
+RWStructuredBuffer<int> twins;
+
+[shader(\"compute\")] [numthreads(256, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+  uint i = tid.x;
+  if ((i >= params.he_count)) {
+    return;
+  }
+  int src_i = sources[i];
+  int tgt_i = targets[i];
+  int found = (-1u);
+  for (uint j = 0u; j < params.he_count; ++j) {
+    if (((sources[j] == tgt_i) && (targets[j] == src_i))) {
+      found = int(j);
+    }
+  }
+  twins[i] = found;
+  return;
+}"
+
+example : LeanSlang.emit shader = expected := by native_decide
+
 example : shader.entryPointName = "main" := by native_decide
 
 end Curvenet.SlangCodegen.HalfedgeBuilder

@@ -76,6 +76,44 @@ def shader : SlangShaderModule :=
               (.bin "*" (.var "t")   (.index (.var "last_w_pair")  (.litUint 1))))
         , .ret none ] }] }
 
+def expected : String :=
+"struct CurveInterpParams {
+  uint n;
+};
+
+[[vk::binding(0, 0)]]
+ConstantBuffer<CurveInterpParams> params;
+[[vk::binding(1, 0)]]
+StructuredBuffer<float3> first_n_pair;
+[[vk::binding(2, 0)]]
+StructuredBuffer<float3> last_n_pair;
+[[vk::binding(3, 0)]]
+StructuredBuffer<float> first_w_pair;
+[[vk::binding(4, 0)]]
+StructuredBuffer<float> last_w_pair;
+[[vk::binding(5, 0)]]
+RWStructuredBuffer<float3> out_n;
+[[vk::binding(6, 0)]]
+RWStructuredBuffer<float> out_w;
+
+[shader(\"compute\")] [numthreads(64, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+  uint i = tid.x;
+  if ((i >= params.n)) {
+    return;
+  }
+  float denom = max(1.000000, float((params.n - 1u)));
+  float t = (float(i) / denom);
+  float omt = (1.000000 - t);
+  out_n[(2u * i)] = ((omt * first_n_pair[0u]) + (t * last_n_pair[0u]));
+  out_w[(2u * i)] = ((omt * first_w_pair[0u]) + (t * last_w_pair[0u]));
+  out_n[((2u * i) + 1u)] = ((omt * first_n_pair[1u]) + (t * last_n_pair[1u]));
+  out_w[((2u * i) + 1u)] = ((omt * first_w_pair[1u]) + (t * last_w_pair[1u]));
+  return;
+}"
+
+example : LeanSlang.emit shader = expected := by native_decide
+
 example : shader.entryPointName = "main" := by native_decide
 
 end Curvenet.SlangCodegen.CurveInterp

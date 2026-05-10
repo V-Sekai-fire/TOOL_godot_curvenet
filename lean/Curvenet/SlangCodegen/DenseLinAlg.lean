@@ -146,6 +146,70 @@ def shader : SlangShaderModule :=
                   (.bin "/" (.var "xi") (.var "uii"))) ]
         , .ret none ] }] }
 
+def expected : String :=
+"struct DenseLinAlgParams {
+  uint num_systems;
+  uint n;
+};
+
+[[vk::binding(0, 0)]]
+ConstantBuffer<DenseLinAlgParams> params;
+[[vk::binding(1, 0)]]
+StructuredBuffer<float> A;
+[[vk::binding(2, 0)]]
+StructuredBuffer<float> b;
+[[vk::binding(3, 0)]]
+RWStructuredBuffer<float> x;
+
+[shader(\"compute\")] [numthreads(64, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+  uint s = tid.x;
+  if ((s >= params.num_systems)) {
+    return;
+  }
+  uint n = params.n;
+  uint abase = (s * (n * n));
+  uint vbase = (s * n);
+  float M[256];
+  float y[16];
+  for (uint i = 0u; i < n; ++i) {
+    for (uint j = 0u; j < n; ++j) {
+      M[((i * n) + j)] = A[(abase + ((i * n) + j))];
+    }
+  }
+  for (uint k = 0u; k < n; ++k) {
+    float akk = M[((k * n) + k)];
+    if ((abs(akk) > 0.000000)) {
+      for (uint i = (k + 1u); i < n; ++i) {
+        float factor = (M[((i * n) + k)] / akk);
+        M[((i * n) + k)] = factor;
+        for (uint j = (k + 1u); j < n; ++j) {
+          M[((i * n) + j)] = (M[((i * n) + j)] - (factor * M[((k * n) + j)]));
+        }
+      }
+    }
+  }
+  for (uint i = 0u; i < n; ++i) {
+    float yi = b[(vbase + i)];
+    for (uint j = 0u; j < i; ++j) {
+      yi = (yi - (M[((i * n) + j)] * y[j]));
+    }
+    y[i] = yi;
+  }
+  for (uint ii = 0u; ii < n; ++ii) {
+    uint i = ((n - 1u) - ii);
+    float xi = y[i];
+    for (uint j = (i + 1u); j < n; ++j) {
+      xi = (xi - (M[((i * n) + j)] * x[(vbase + j)]));
+    }
+    float uii = M[((i * n) + i)];
+    x[(vbase + i)] = ((abs(uii) < 0.000000) ? 0.000000 : (xi / uii));
+  }
+  return;
+}"
+
+example : LeanSlang.emit shader = expected := by native_decide
+
 example : shader.entryPointName = "main" := by native_decide
 
 end Curvenet.SlangCodegen.DenseLinAlg

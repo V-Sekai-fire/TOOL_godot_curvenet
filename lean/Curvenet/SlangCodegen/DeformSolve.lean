@@ -99,6 +99,52 @@ def shader : SlangShaderModule :=
       , ⟨"div_F",          .rwBuf f3Ty,           Semantic.none, some 6, some 0, .qIn⟩ ]
   , functions := [loadM3, mainEntry] }
 
+def expected : String :=
+"struct DeformParams {
+  uint num_verts;
+};
+
+[[vk::binding(0, 0)]]
+ConstantBuffer<DeformParams> params;
+[[vk::binding(1, 0)]]
+StructuredBuffer<int> incident_start;
+[[vk::binding(2, 0)]]
+StructuredBuffer<int> incident_idx;
+[[vk::binding(3, 0)]]
+StructuredBuffer<float> F_seg;
+[[vk::binding(4, 0)]]
+StructuredBuffer<float3> rest_p;
+[[vk::binding(5, 0)]]
+StructuredBuffer<float3> rest_q;
+[[vk::binding(6, 0)]]
+RWStructuredBuffer<float3> div_F;
+
+float3x3 loadM3(StructuredBuffer<float> buf, uint base) {
+  return float3x3(buf[(base + 0u)], buf[(base + 1u)], buf[(base + 2u)], buf[(base + 3u)], buf[(base + 4u)], buf[(base + 5u)], buf[(base + 6u)], buf[(base + 7u)], buf[(base + 8u)]);
+}
+
+[shader(\"compute\")] [numthreads(256, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+  uint v = tid.x;
+  if ((v >= params.num_verts)) {
+    return;
+  }
+  uint rs = uint(incident_start[v]);
+  uint re = uint(incident_start[(v + 1u)]);
+  float3 acc = float3(0.000000, 0.000000, 0.000000);
+  for (uint p = rs; p < re; ++p) {
+    uint s = uint(incident_idx[p]);
+    float3 edge = (rest_q[s] - rest_p[s]);
+    uint fbase = (s * 9u);
+    float3x3 F = loadM3(F_seg, fbase);
+    acc = (acc + mul(F, edge));
+  }
+  div_F[v] = acc;
+  return;
+}"
+
+example : LeanSlang.emit shader = expected := by native_decide
+
 example : shader.entryPointName = "main" := by native_decide
 
 end Curvenet.SlangCodegen.DeformSolve

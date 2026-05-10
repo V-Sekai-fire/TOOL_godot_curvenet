@@ -93,6 +93,57 @@ def shader : SlangShaderModule :=
               (.call "sqrt" [.var "rad"]))
         , .ret none ] }] }
 
+def expected : String :=
+"struct ICholParams {
+  uint num_rows;
+};
+
+[[vk::binding(0, 0)]]
+ConstantBuffer<ICholParams> params;
+[[vk::binding(1, 0)]]
+StructuredBuffer<int> row_ptr;
+[[vk::binding(2, 0)]]
+StructuredBuffer<int> col_idx;
+[[vk::binding(3, 0)]]
+StructuredBuffer<float> a_vals;
+[[vk::binding(4, 0)]]
+StructuredBuffer<uint> color_rows;
+[[vk::binding(5, 0)]]
+StructuredBuffer<uint> num_color_rows;
+[[vk::binding(6, 0)]]
+RWStructuredBuffer<float> l_vals;
+
+[shader(\"compute\")] [numthreads(64, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+  uint t = tid.x;
+  uint ncr = num_color_rows[0u];
+  if ((t >= ncr)) {
+    return;
+  }
+  uint i = color_rows[t];
+  uint rs = uint(row_ptr[i]);
+  uint re = uint(row_ptr[(i + 1u)]);
+  float sum2 = 0.000000;
+  uint diag_pos = rs;
+  for (uint p = rs; p < re; ++p) {
+    uint j = uint(col_idx[p]);
+    if ((j < i)) {
+      float lij = ((a_vals[p] - 0.000000) / 1.000000);
+      l_vals[p] = lij;
+      sum2 = (sum2 + (lij * lij));
+    }
+    if ((j == i)) {
+      diag_pos = p;
+    }
+  }
+  float aii = a_vals[diag_pos];
+  float rad = (aii - sum2);
+  l_vals[diag_pos] = ((rad <= 0.000000) ? 0.000000 : sqrt(rad));
+  return;
+}"
+
+example : LeanSlang.emit shader = expected := by native_decide
+
 example : shader.entryPointName = "main" := by native_decide
 
 end Curvenet.SlangCodegen.IncompleteCholesky

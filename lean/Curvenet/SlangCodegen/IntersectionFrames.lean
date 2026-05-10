@@ -136,6 +136,81 @@ def shader : SlangShaderModule :=
       , ⟨"F_minus",      .rwBuf floatTy,             Semantic.none, some 6, some 0, .qIn⟩ ]
   , functions := [loadM3, inv3x3, mainEntry] }
 
+def expected : String :=
+"struct IsectFramesParams {
+  uint num_isects;
+};
+
+[[vk::binding(0, 0)]]
+ConstantBuffer<IsectFramesParams> params;
+[[vk::binding(1, 0)]]
+StructuredBuffer<float> rest_plus;
+[[vk::binding(2, 0)]]
+StructuredBuffer<float> posed_plus;
+[[vk::binding(3, 0)]]
+StructuredBuffer<float> rest_minus;
+[[vk::binding(4, 0)]]
+StructuredBuffer<float> posed_minus;
+[[vk::binding(5, 0)]]
+RWStructuredBuffer<float> F_plus;
+[[vk::binding(6, 0)]]
+RWStructuredBuffer<float> F_minus;
+
+float3x3 loadM3(StructuredBuffer<float> buf, uint base) {
+  return float3x3(buf[(base + 0u)], buf[(base + 1u)], buf[(base + 2u)], buf[(base + 3u)], buf[(base + 4u)], buf[(base + 5u)], buf[(base + 6u)], buf[(base + 7u)], buf[(base + 8u)]);
+}
+
+float3x3 inv3x3(float3x3 m) {
+  float a = m._m00;
+  float b = m._m01;
+  float c = m._m02;
+  float d = m._m10;
+  float e = m._m11;
+  float f = m._m12;
+  float g = m._m20;
+  float h = m._m21;
+  float i = m._m22;
+  float det = (((a * ((e * i) - (f * h))) - (b * ((d * i) - (f * g)))) + (c * ((d * h) - (e * g))));
+  float invDet = ((abs(det) < 0.000000) ? 0.000000 : (1.000000 / det));
+  return float3x3((invDet * ((e * i) - (f * h))), (invDet * ((c * h) - (b * i))), (invDet * ((b * f) - (c * e))), (invDet * ((f * g) - (d * i))), (invDet * ((a * i) - (c * g))), (invDet * ((c * d) - (a * f))), (invDet * ((d * h) - (e * g))), (invDet * ((b * g) - (a * h))), (invDet * ((a * e) - (b * d))));
+}
+
+[shader(\"compute\")] [numthreads(64, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+  uint t = tid.x;
+  if ((t >= params.num_isects)) {
+    return;
+  }
+  uint base = (t * 9u);
+  float3x3 rp = loadM3(rest_plus, base);
+  float3x3 pp = loadM3(posed_plus, base);
+  float3x3 rm = loadM3(rest_minus, base);
+  float3x3 pm = loadM3(posed_minus, base);
+  float3x3 Fp = mul(pp, inv3x3(rp));
+  float3x3 Fm = mul(pm, inv3x3(rm));
+  F_plus[(base + 0u)] = Fp._m00;
+  F_plus[(base + 1u)] = Fp._m01;
+  F_plus[(base + 2u)] = Fp._m02;
+  F_plus[(base + 3u)] = Fp._m10;
+  F_plus[(base + 4u)] = Fp._m11;
+  F_plus[(base + 5u)] = Fp._m12;
+  F_plus[(base + 6u)] = Fp._m20;
+  F_plus[(base + 7u)] = Fp._m21;
+  F_plus[(base + 8u)] = Fp._m22;
+  F_minus[(base + 0u)] = Fm._m00;
+  F_minus[(base + 1u)] = Fm._m01;
+  F_minus[(base + 2u)] = Fm._m02;
+  F_minus[(base + 3u)] = Fm._m10;
+  F_minus[(base + 4u)] = Fm._m11;
+  F_minus[(base + 5u)] = Fm._m12;
+  F_minus[(base + 6u)] = Fm._m20;
+  F_minus[(base + 7u)] = Fm._m21;
+  F_minus[(base + 8u)] = Fm._m22;
+  return;
+}"
+
+example : LeanSlang.emit shader = expected := by native_decide
+
 example : shader.entryPointName = "main" := by native_decide
 
 end Curvenet.SlangCodegen.IntersectionFrames

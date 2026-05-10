@@ -75,6 +75,38 @@ def shader : SlangShaderModule :=
               (.litUint 0) (.litUint 1))
         , .ret none ] }] }
 
+def expected : String :=
+"struct CutMeshParams {
+  uint num_faces;
+  uint num_segments;
+};
+
+[[vk::binding(0, 0)]]
+ConstantBuffer<CutMeshParams> params;
+[[vk::binding(1, 0)]]
+StructuredBuffer<float> signed_dists;
+[[vk::binding(2, 0)]]
+RWStructuredBuffer<uint> crosses;
+
+[shader(\"compute\")] [numthreads(64, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+  uint gid = tid.x;
+  uint total = (params.num_faces * params.num_segments);
+  if ((gid >= total)) {
+    return;
+  }
+  uint base = (gid * 3u);
+  float d0 = signed_dists[base];
+  float d1 = signed_dists[(base + 1u)];
+  float d2 = signed_dists[(base + 2u)];
+  uint all_pos = ((((d0 >= 0.000000) && (d1 >= 0.000000)) && (d2 >= 0.000000)) ? 1u : 0u);
+  uint all_neg = ((((d0 <= 0.000000) && (d1 <= 0.000000)) && (d2 <= 0.000000)) ? 1u : 0u);
+  crosses[gid] = (((all_pos == 1u) || (all_neg == 1u)) ? 0u : 1u);
+  return;
+}"
+
+example : LeanSlang.emit shader = expected := by native_decide
+
 example : shader.entryPointName = "main" := by native_decide
 
 end Curvenet.SlangCodegen.CutMesh

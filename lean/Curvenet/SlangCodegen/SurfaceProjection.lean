@@ -150,6 +150,86 @@ def shader : SlangShaderModule :=
       , ⟨"tri_idx",   .rwBuf intTy,            Semantic.none, some 6, some 0, .qIn⟩ ]
   , functions := [closest_on_tri, mainEntry] }
 
+def expected : String :=
+"struct SurfProjParams {
+  uint num_queries;
+  uint num_tris;
+};
+
+[[vk::binding(0, 0)]]
+ConstantBuffer<SurfProjParams> params;
+[[vk::binding(1, 0)]]
+StructuredBuffer<float3> queries;
+[[vk::binding(2, 0)]]
+StructuredBuffer<float3> tri_a;
+[[vk::binding(3, 0)]]
+StructuredBuffer<float3> tri_b;
+[[vk::binding(4, 0)]]
+StructuredBuffer<float3> tri_c;
+[[vk::binding(5, 0)]]
+RWStructuredBuffer<float3> projected;
+[[vk::binding(6, 0)]]
+RWStructuredBuffer<int> tri_idx;
+
+float3 closest_on_tri(float3 q, float3 a, float3 b, float3 c) {
+  float3 ab = (b - a);
+  float3 ac = (c - a);
+  float3 ap = (q - a);
+  float d1 = dot(ab, ap);
+  float d2 = dot(ac, ap);
+  if (((d1 <= 0.000000) && (d2 <= 0.000000))) {
+    return a;
+  }
+  float3 bp = (q - b);
+  float d3 = dot(ab, bp);
+  float d4 = dot(ac, bp);
+  if (((d3 >= 0.000000) && (d4 <= d3))) {
+    return b;
+  }
+  float3 cp = (q - c);
+  float d5 = dot(ab, cp);
+  float d6 = dot(ac, cp);
+  if (((d6 >= 0.000000) && (d5 <= d6))) {
+    return c;
+  }
+  float vc = ((d1 * d4) - (d3 * d2));
+  if ((((vc <= 0.000000) && (d1 >= 0.000000)) && (d3 <= 0.000000))) {
+    float v_e = (d1 / (d1 - d3));
+    return (a + (v_e * ab));
+  }
+  float denom = (vc + ((d4 * (d6 - d4)) + (d5 * (d2 - d5))));
+  float v = ((abs(denom) < 0.000000) ? 0.000000 : (vc / denom));
+  float w = ((abs(denom) < 0.000000) ? 0.000000 : (((d1 * d4) - (d3 * d2)) / denom));
+  return (a + ((v * ab) + (w * ac)));
+}
+
+[shader(\"compute\")] [numthreads(64, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+  uint qi = tid.x;
+  if ((qi >= params.num_queries)) {
+    return;
+  }
+  float3 q = queries[qi];
+  float3 best_p = float3(0.000000, 0.000000, 0.000000);
+  float best_d2 = 1000000000000000019884624838656.000000;
+  int best_t = (-1u);
+  for (uint t = 0u; t < params.num_tris; ++t) {
+    float3 p = closest_on_tri(q, tri_a[t], tri_b[t], tri_c[t]);
+    float3 v = (p - q);
+    float d2 = dot(v, v);
+    if ((d2 < best_d2)) {
+      best_d2 = d2;
+      best_p = p;
+      best_t = int(t);
+    }
+  }
+  projected[qi] = best_p;
+  tri_idx[qi] = best_t;
+  return;
+}"
+
+example : LeanSlang.emit shader = expected := by native_decide
+
 example : shader.entryPointName = "main" := by native_decide
 
 end Curvenet.SlangCodegen.SurfaceProjection

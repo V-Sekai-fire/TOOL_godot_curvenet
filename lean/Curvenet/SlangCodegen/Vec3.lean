@@ -50,6 +50,37 @@ def shader : SlangShaderModule :=
             (.call "length" [.var "av"])
         , .ret none ] }] }
 
+def expected : String :=
+"struct Vec3Params {
+  uint n;
+};
+
+[[vk::binding(0, 0)]]
+ConstantBuffer<Vec3Params> params;
+[[vk::binding(1, 0)]]
+StructuredBuffer<float3> a;
+[[vk::binding(2, 0)]]
+StructuredBuffer<float3> b;
+[[vk::binding(3, 0)]]
+RWStructuredBuffer<float> out_dot;
+[[vk::binding(4, 0)]]
+RWStructuredBuffer<float> out_len;
+
+[shader(\"compute\")] [numthreads(256, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+  uint i = tid.x;
+  if ((i >= params.n)) {
+    return;
+  }
+  float3 av = a[i];
+  float3 bv = b[i];
+  out_dot[i] = dot(av, bv);
+  out_len[i] = length(av);
+  return;
+}"
+
+example : LeanSlang.emit shader = expected := by native_decide
+
 example : shader.entryPointName = "main" := by native_decide
 
 end Curvenet.SlangCodegen.Vec3

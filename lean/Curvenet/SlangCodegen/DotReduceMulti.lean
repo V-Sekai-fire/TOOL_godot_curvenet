@@ -178,6 +178,114 @@ def shader : SlangShaderModule :=
       , ⟨"dst",    .rwBuf (.scalar .float),       Semantic.none, some 3, some 0, .qIn⟩ ]
   , functions := [two_sum, quick_two_sum, two_prod, df_add, mainEntry] }
 
+def expected : String :=
+"struct DotReduceMultiParams {
+  uint n;
+  uint k;
+};
+
+groupshared float s_hi[128][16];
+groupshared float s_lo[128][16];
+
+[[vk::binding(0, 0)]]
+ConstantBuffer<DotReduceMultiParams> params;
+[[vk::binding(1, 0)]]
+StructuredBuffer<float> a;
+[[vk::binding(2, 0)]]
+StructuredBuffer<float> b;
+[[vk::binding(3, 0)]]
+RWStructuredBuffer<float> dst;
+
+void two_sum(float a, float b, out float hi, out float lo) {
+  precise float h = (a + b);
+  precise float bb = (h - a);
+  precise float ah = (h - bb);
+  precise float lo_a = (a - ah);
+  precise float lo_b = (b - bb);
+  hi = h;
+  lo = (lo_a + lo_b);
+  return;
+}
+
+void quick_two_sum(float a, float b, out float hi, out float lo) {
+  precise float h = (a + b);
+  precise float t = (h - a);
+  hi = h;
+  lo = (b - t);
+  return;
+}
+
+void two_prod(float a, float b, out float hi, out float lo) {
+  precise float h = (a * b);
+  hi = h;
+  lo = fma(a, b, (-h));
+  return;
+}
+
+void df_add(float x_hi, float x_lo, float y_hi, float y_lo, out float z_hi, out float z_lo) {
+  float sh;
+  float sl;
+  two_sum(x_hi, y_hi, sh, sl);
+  precise float xy_lo = (x_lo + y_lo);
+  precise float sl2 = (sl + xy_lo);
+  quick_two_sum(sh, sl2, z_hi, z_lo);
+  return;
+}
+
+[shader(\"compute\")] [numthreads(128, 1, 1)]
+void main(uint3 tid : SV_GroupThreadID) {
+  uint t = tid.x;
+  uint stride = 128u;
+  float acc_hi[16];
+  float acc_lo[16];
+  for (uint c = 0u; c < params.k; ++c) {
+    acc_hi[c] = 0.000000;
+    acc_lo[c] = 0.000000;
+  }
+  uint i = t;
+  while ((i < params.n)) {
+    for (uint c = 0u; c < params.k; ++c) {
+      float p_hi;
+      float p_lo;
+      two_prod(a[((i * params.k) + c)], b[((i * params.k) + c)], p_hi, p_lo);
+      float new_hi;
+      float new_lo;
+      df_add(acc_hi[c], acc_lo[c], p_hi, p_lo, new_hi, new_lo);
+      acc_hi[c] = new_hi;
+      acc_lo[c] = new_lo;
+    }
+    i = (i + stride);
+  }
+  for (uint c = 0u; c < params.k; ++c) {
+    s_hi[t][c] = acc_hi[c];
+    s_lo[t][c] = acc_lo[c];
+  }
+  GroupMemoryBarrierWithGroupSync();
+  uint step = 64u;
+  while ((step > 0u)) {
+    if ((t < step)) {
+      for (uint c = 0u; c < params.k; ++c) {
+        float new_hi;
+        float new_lo;
+        df_add(s_hi[t][c], s_lo[t][c], s_hi[(t + step)][c], s_lo[(t + step)][c], new_hi, new_lo);
+        s_hi[t][c] = new_hi;
+        s_lo[t][c] = new_lo;
+      }
+    }
+    GroupMemoryBarrierWithGroupSync();
+    step = (step >> 1u);
+  }
+  if ((t == 0u)) {
+    for (uint c = 0u; c < params.k; ++c) {
+      dst[((2u * c) + 0u)] = s_hi[0u][c];
+      dst[((2u * c) + 1u)] = s_lo[0u][c];
+    }
+  }
+  return;
+}"
+
+example : LeanSlang.emit shader = expected := by native_decide
+
 example : shader.entryPointName = "main" := by native_decide
 
 end Curvenet.SlangCodegen.DotReduceMulti

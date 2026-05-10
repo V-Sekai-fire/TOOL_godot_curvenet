@@ -52,6 +52,32 @@ def shader : SlangShaderModule :=
         , .assign (.index (.var "labels") (.var "f")) (.var "n")
         , .ret none ] }] }
 
+def expected : String :=
+"struct CutAlgoParams {
+  uint num_faces;
+};
+
+[[vk::binding(0, 0)]]
+ConstantBuffer<CutAlgoParams> params;
+[[vk::binding(1, 0)]]
+StructuredBuffer<uint> edge_crossed;
+[[vk::binding(2, 0)]]
+RWStructuredBuffer<uint> labels;
+
+[shader(\"compute\")] [numthreads(256, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+  uint f = tid.x;
+  if ((f >= params.num_faces)) {
+    return;
+  }
+  uint base = (f * 3u);
+  uint n = ((edge_crossed[base] + edge_crossed[(base + 1u)]) + edge_crossed[(base + 2u)]);
+  labels[f] = n;
+  return;
+}"
+
+example : LeanSlang.emit shader = expected := by native_decide
+
 example : shader.entryPointName = "main" := by native_decide
 
 end Curvenet.SlangCodegen.CutAlgorithm

@@ -80,6 +80,50 @@ def shader : SlangShaderModule :=
               (.bin "*" (.member (.var "params") "alpha") (.var "Api")))
         , .ret none ] }] }
 
+def expected : String :=
+"struct SparseLAParams {
+  uint n;
+  float alpha;
+};
+
+[[vk::binding(0, 0)]]
+ConstantBuffer<SparseLAParams> params;
+[[vk::binding(1, 0)]]
+StructuredBuffer<int> rowPtr;
+[[vk::binding(2, 0)]]
+StructuredBuffer<int> colIdx;
+[[vk::binding(3, 0)]]
+StructuredBuffer<float> values;
+[[vk::binding(4, 0)]]
+StructuredBuffer<float> p_old;
+[[vk::binding(5, 0)]]
+StructuredBuffer<float> r_old;
+[[vk::binding(6, 0)]]
+StructuredBuffer<float> x_old;
+[[vk::binding(7, 0)]]
+RWStructuredBuffer<float> r_new;
+[[vk::binding(8, 0)]]
+RWStructuredBuffer<float> x_new;
+
+[shader(\"compute\")] [numthreads(256, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+  uint i = tid.x;
+  if ((i >= params.n)) {
+    return;
+  }
+  uint rs = uint(rowPtr[i]);
+  uint re = uint(rowPtr[(i + 1u)]);
+  float Api = 0.000000;
+  for (uint p = rs; p < re; ++p) {
+    Api = fma(values[p], p_old[uint(colIdx[p])], Api);
+  }
+  x_new[i] = fma(params.alpha, p_old[i], x_old[i]);
+  r_new[i] = (r_old[i] - (params.alpha * Api));
+  return;
+}"
+
+example : LeanSlang.emit shader = expected := by native_decide
+
 example : shader.entryPointName = "main" := by native_decide
 
 end Curvenet.SlangCodegen.SparseLinAlg

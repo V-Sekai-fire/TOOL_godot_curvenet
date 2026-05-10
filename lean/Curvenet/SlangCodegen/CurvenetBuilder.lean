@@ -76,6 +76,51 @@ def shader : SlangShaderModule :=
         ] ++ storeM3 (.var "base") (.var "F") ++
         [ .ret none ] }] }
 
+def expected : String :=
+"struct CnetBuilderParams {
+  uint num_segments;
+};
+
+[[vk::binding(0, 0)]]
+ConstantBuffer<CnetBuilderParams> params;
+[[vk::binding(1, 0)]]
+StructuredBuffer<float3> tangents;
+[[vk::binding(2, 0)]]
+StructuredBuffer<float3> normals;
+[[vk::binding(3, 0)]]
+StructuredBuffer<float> widths;
+[[vk::binding(4, 0)]]
+RWStructuredBuffer<float> frames;
+
+[shader(\"compute\")] [numthreads(64, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+  uint i = tid.x;
+  if ((i >= params.num_segments)) {
+    return;
+  }
+  float3 t = normalize(tangents[i]);
+  float3 n = normalize(normals[i]);
+  float3 b = cross(t, n);
+  float w = widths[i];
+  float3 ts = (w * t);
+  float3 ns = (w * n);
+  float3 bs = (w * b);
+  float3x3 F = float3x3(ts.x, ns.x, bs.x, ts.y, ns.y, bs.y, ts.z, ns.z, bs.z);
+  uint base = (i * 9u);
+  frames[(base + 0u)] = F._m00;
+  frames[(base + 1u)] = F._m01;
+  frames[(base + 2u)] = F._m02;
+  frames[(base + 3u)] = F._m10;
+  frames[(base + 4u)] = F._m11;
+  frames[(base + 5u)] = F._m12;
+  frames[(base + 6u)] = F._m20;
+  frames[(base + 7u)] = F._m21;
+  frames[(base + 8u)] = F._m22;
+  return;
+}"
+
+example : LeanSlang.emit shader = expected := by native_decide
+
 example : shader.entryPointName = "main" := by native_decide
 
 end Curvenet.SlangCodegen.CurvenetBuilder

@@ -84,6 +84,53 @@ def shader : SlangShaderModule :=
         , .ret none
         ] }] }
 
+def expected : String :=
+"struct SgsParams {
+  uint n;
+  uint num_color_rows;
+};
+
+[[vk::binding(0, 0)]]
+ConstantBuffer<SgsParams> params;
+[[vk::binding(1, 0)]]
+StructuredBuffer<int> rowPtr;
+[[vk::binding(2, 0)]]
+StructuredBuffer<int> colIdx;
+[[vk::binding(3, 0)]]
+StructuredBuffer<float> values;
+[[vk::binding(4, 0)]]
+StructuredBuffer<float> diag;
+[[vk::binding(5, 0)]]
+StructuredBuffer<int> colorRows;
+[[vk::binding(6, 0)]]
+StructuredBuffer<float> b;
+[[vk::binding(7, 0)]]
+RWStructuredBuffer<float> x;
+
+[shader(\"compute\")] [numthreads(64, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+  uint t = tid.x;
+  if ((t >= params.num_color_rows)) {
+    return;
+  }
+  uint i = uint(colorRows[t]);
+  float d = diag[i];
+  if ((d == 0.000000)) {
+    return;
+  }
+  uint rs = uint(rowPtr[i]);
+  uint re = uint(rowPtr[(i + 1u)]);
+  float s_full = 0.000000;
+  for (uint k = rs; k < re; ++k) {
+    s_full = (s_full + (values[k] * x[uint(colIdx[k])]));
+  }
+  float s_off = (s_full - (d * x[i]));
+  x[i] = ((b[i] - s_off) / d);
+  return;
+}"
+
+example : LeanSlang.emit shader = expected := by native_decide
+
 example : shader.entryPointName = "main" := by native_decide
 
 end Curvenet.SlangCodegen.SgsColor
