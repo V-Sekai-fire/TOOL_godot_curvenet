@@ -30,7 +30,7 @@ jobs:
             ~/.elan
             lean/.lake/packages
             lean/.lake/build
-          key: elan-lake-${{ hashFiles('lean/lean-toolchain', 'lean/lake-manifest.json') }}
+          key: elan-lake-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('lean/lean-toolchain', 'lean/lake-manifest.json') }}
 
       - name: Install elan / Lean
         run: |
@@ -42,7 +42,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: bin/.slang
-          key: slang-${{ hashFiles('misc/install-slang.sh') }}
+          # OS + arch is essential here — slangc is a native binary, so a
+          # cache populated by a Linux runner is unusable on macOS aarch64
+          # and vice versa.
+          key: slang-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('misc/install-slang.sh') }}
 
       - name: Fetch slangc
         run: |
