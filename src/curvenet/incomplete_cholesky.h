@@ -31,11 +31,21 @@
 #include <unordered_map>
 #include <vector>
 
-#include "kernel_projection.h"
 #include "sparse_linalg.h"
 
 namespace curvenet {
 namespace incomplete_cholesky {
+
+namespace detail {
+inline void zero_mean_in_place(std::vector<double> &v) {
+    const std::size_t n = v.size();
+    if (n == 0) return;
+    double s = 0.0;
+    for (double x : v) s += x;
+    const double m = s / static_cast<double>(n);
+    for (double &x : v) x -= m;
+}
+} // namespace detail
 
 // Lower-triangular CSR factor `L` such that L · L^T ≈ A.
 // `L.row_ptr[i]..L.row_ptr[i+1]` holds entries `L[i, j]` with j ≤ i.
@@ -278,7 +288,7 @@ inline std::vector<double> cg_icc_with_guess_diag(
     const std::vector<double> Ax0 = sparse::spmv(A, x0);
     std::vector<double> r = sparse::saxpby(1.0, b, -1.0, Ax0);
     std::vector<double> z = apply_minv(fac, r);
-    if (project_kernel) kernel_projection::zero_mean_in_place(z);
+    if (project_kernel) detail::zero_mean_in_place(z);
     std::vector<double> p = z;
     double rz_old = sparse::dot(r, z);
     const double tol_sq = tol * tol;
@@ -294,7 +304,7 @@ inline std::vector<double> cg_icc_with_guess_diag(
         for (double v : x) x_inf = std::max(x_inf, std::fabs(v));
         const double rr = sparse::dot(r, r);
         z = apply_minv(fac, r);
-        if (project_kernel) kernel_projection::zero_mean_in_place(z);
+        if (project_kernel) detail::zero_mean_in_place(z);
         const double rz_new = sparse::dot(r, z);
         const double beta = (rz_old == 0.0) ? 0.0 : (rz_new / rz_old);
         trace.push_back({ iter, r_inf, x_inf, alpha, beta, rz_old, pAp });
@@ -333,7 +343,7 @@ inline std::vector<double> cg_icc_with_guess(
     const std::vector<double> Ax0 = sparse::spmv(A, x0);
     std::vector<double> r = sparse::saxpby(1.0, b, -1.0, Ax0);
     std::vector<double> z = apply_minv(fac, r);
-    if (project_kernel) kernel_projection::zero_mean_in_place(z);
+    if (project_kernel) detail::zero_mean_in_place(z);
     std::vector<double> p = z;
     double rz_old = sparse::dot(r, z);
     const double tol_sq = tol * tol;
@@ -346,7 +356,7 @@ inline std::vector<double> cg_icc_with_guess(
         sparse::axpy_inplace(-alpha, Ap, r);
         if (sparse::dot(r, r) < tol_sq) break;
         z = apply_minv(fac, r);
-        if (project_kernel) kernel_projection::zero_mean_in_place(z);
+        if (project_kernel) detail::zero_mean_in_place(z);
         const double rz_new = sparse::dot(r, z);
         const double beta = (rz_old == 0.0) ? 0.0 : (rz_new / rz_old);
         p = sparse::saxpby(1.0, z, beta, p);

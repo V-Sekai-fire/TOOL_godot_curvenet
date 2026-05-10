@@ -29,11 +29,6 @@ import Curvenet.CutAlgorithm
 import Curvenet.IntersectionFrames
 import Curvenet.CurveInterp
 import Curvenet.SegmentGradient
-import Curvenet.ChebyshevAccel
-import Curvenet.TwoLevelSchwarz
-import Curvenet.MultiLevelSchwarz
-import Curvenet.HeavyEdgeMatching
-import Curvenet.KernelProjection
 import Curvenet.IncompleteCholesky
 import Curvenet.HierarchicalSparsifyCompensate
 import Curvenet.GraphColoring

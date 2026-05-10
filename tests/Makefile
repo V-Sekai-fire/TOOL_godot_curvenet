@@ -25,7 +25,7 @@ RC_SRC := $(shell find $(RC)/src -name "*.cpp")
 RC_OBJ := $(RC_SRC:.cpp=.o)
 LIBRC := librapidcheck.a
 
-TESTS := test_halfedge test_polygon_laplacian test_dense_linalg test_scaled_frames test_cut_algorithm test_deform_solve test_halfedge_builder test_curvenet_builder test_surface_projection test_chebyshev_accel test_two_level_schwarz test_multi_level_schwarz test_heavy_edge_matching test_kernel_projection test_incomplete_cholesky test_deformer_pipeline_identity test_hierarchical_sparsify
+TESTS := test_halfedge test_polygon_laplacian test_dense_linalg test_scaled_frames test_cut_algorithm test_deform_solve test_halfedge_builder test_curvenet_builder test_surface_projection test_incomplete_cholesky test_deformer_pipeline_identity test_hierarchical_sparsify
 TEST_BINS := $(addprefix bin/,$(TESTS))
 
 BENCH_CXXFLAGS := -std=c++14 -O3 -DNDEBUG -Wall -Wno-missing-braces \
@@ -198,12 +198,6 @@ bin/bench_hsc_parallel_5k: bench_hsc_parallel_5k.cpp mire_body_data.h | bin
 bench_hsc_parallel_5k: bin/bench_hsc_parallel_5k
 	@bin/bench_hsc_parallel_5k
 
-bin/bench_hsc_parallel_81k: bench_hsc_parallel_81k.cpp mire_body_70k_data.h | bin
-	$(CXX) $(BENCH_CXXFLAGS) -lpthread -o $@ $<
-
-bench_hsc_parallel_81k: bin/bench_hsc_parallel_81k
-	@bin/bench_hsc_parallel_81k
-
 bin/diag_hsc_profile_5k: diag_hsc_profile_5k.cpp mire_body_data.h | bin
 	$(CXX) $(BENCH_CXXFLAGS) -o $@ $<
 
@@ -215,12 +209,6 @@ bin/diag_hsc_max_degree_sweep: diag_hsc_max_degree_sweep.cpp mire_body_data.h | 
 
 diag_hsc_max_degree_sweep: bin/diag_hsc_max_degree_sweep
 	@bin/diag_hsc_max_degree_sweep
-
-bin/bench_hsc_block_5k: bench_hsc_block_5k.cpp mire_body_data.h | bin
-	$(CXX) $(BENCH_CXXFLAGS) -lpthread -o $@ $<
-
-bench_hsc_block_5k: bin/bench_hsc_block_5k
-	@bin/bench_hsc_block_5k
 
 bin/bench_hsc_warm_5k: bench_hsc_warm_5k.cpp mire_body_data.h | bin
 	$(CXX) $(BENCH_CXXFLAGS) -lpthread -o $@ $<
@@ -293,18 +281,6 @@ bin/diag_meshlet_solve: diag_meshlet_solve.cpp mire_body_data.h $(MESHOPT_OBJ) |
 diag_meshlet_solve: bin/diag_meshlet_solve
 	@bin/diag_meshlet_solve
 
-bin/diag_meshlet_schwarz: diag_meshlet_schwarz.cpp mire_body_data.h $(MESHOPT_OBJ) | bin
-	$(CXX) $(BENCH_CXXFLAGS) -I$(MESHOPT_DIR)/src -o $@ $< $(MESHOPT_OBJ)
-
-diag_meshlet_schwarz: bin/diag_meshlet_schwarz
-	@bin/diag_meshlet_schwarz
-
-bin/diag_meshlet_schwarz_overlap: diag_meshlet_schwarz_overlap.cpp mire_body_data.h $(MESHOPT_OBJ) | bin
-	$(CXX) $(BENCH_CXXFLAGS) -I$(MESHOPT_DIR)/src -o $@ $< $(MESHOPT_OBJ)
-
-diag_meshlet_schwarz_overlap: bin/diag_meshlet_schwarz_overlap
-	@bin/diag_meshlet_schwarz_overlap
-
 bin/diag_meshlet_pcg: diag_meshlet_pcg.cpp mire_body_data.h $(MESHOPT_OBJ) | bin
 	$(CXX) $(BENCH_CXXFLAGS) -I$(MESHOPT_DIR)/src -o $@ $< $(MESHOPT_OBJ)
 
@@ -329,29 +305,6 @@ bin/diag_meshlet_local_cg: diag_meshlet_local_cg.cpp mire_body_70k_data.h $(MESH
 diag_meshlet_local_cg: bin/diag_meshlet_local_cg
 	@bin/diag_meshlet_local_cg
 
-bin/diag_meshlet_chebyshev_5k: diag_meshlet_chebyshev_5k.cpp mire_body_data.h $(MESHOPT_OBJ) | bin
-	$(CXX) $(BENCH_CXXFLAGS) -I$(MESHOPT_DIR)/src -o $@ $< $(MESHOPT_OBJ)
-
-diag_meshlet_chebyshev_5k: bin/diag_meshlet_chebyshev_5k
-	@bin/diag_meshlet_chebyshev_5k
-
-bin/diag_two_level_schwarz_5k: diag_two_level_schwarz_5k.cpp mire_body_data.h $(MESHOPT_OBJ) | bin
-	$(CXX) $(BENCH_CXXFLAGS) -I$(MESHOPT_DIR)/src -o $@ $< $(MESHOPT_OBJ)
-
-diag_two_level_schwarz_5k: bin/diag_two_level_schwarz_5k
-	@bin/diag_two_level_schwarz_5k
-
-bin/diag_multi_level_schwarz_5k: diag_multi_level_schwarz_5k.cpp mire_body_data.h $(MESHOPT_OBJ) | bin
-	$(CXX) $(BENCH_CXXFLAGS) -I$(MESHOPT_DIR)/src -o $@ $< $(MESHOPT_OBJ)
-
-diag_multi_level_schwarz_5k: bin/diag_multi_level_schwarz_5k
-	@bin/diag_multi_level_schwarz_5k
-
-bin/diag_multi_level_schwarz_70k: diag_multi_level_schwarz_70k.cpp mire_body_70k_data.h $(MESHOPT_OBJ) | bin
-	$(CXX) $(BENCH_CXXFLAGS) -I$(MESHOPT_DIR)/src -o $@ $< $(MESHOPT_OBJ)
-
-diag_multi_level_schwarz_70k: bin/diag_multi_level_schwarz_70k
-	@bin/diag_multi_level_schwarz_70k
 
 bin/diag_70k_cg_baseline: diag_70k_cg_baseline.cpp mire_body_70k_data.h | bin
 	$(CXX) $(BENCH_CXXFLAGS) -o $@ $<
