@@ -41,6 +41,11 @@ CurveNetGizmoPlugin::CurveNetGizmoPlugin() {
 	create_material("tangent",         Color(1.0f, 0.85f, 0.3f, 1.0f));
 	create_material("tangent_link",    Color(1.0f, 0.85f, 0.3f, 0.6f));
 	create_material("projection_link", Color(0.4f, 0.8f, 1.0f, 1.0f));
+	// DeGoes22 §3 per-knot frame axes (red = tangent, green = normal,
+	// blue = binormal — matches Blender/Godot bone axis convention).
+	create_material("frame_t", Color(1.0f, 0.3f, 0.3f, 1.0f));
+	create_material("frame_n", Color(0.3f, 1.0f, 0.3f, 1.0f));
+	create_material("frame_b", Color(0.3f, 0.5f, 1.0f, 1.0f));
 	create_handle_material("knot_handles",    false);
 	create_handle_material("tangent_handles", false);
 }
@@ -567,6 +572,71 @@ void CurveNetGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 		p_gizmo->add_lines(
 			tangent_lines, get_material("tangent", p_gizmo), false,
 			Color(1.0f, 0.85f, 0.3f, 1.0f));
+	}
+
+	// DeGoes22 §3 per-knot frame visualization: short colored axis
+	// segments at each knot showing the local (tangent, normal, binormal)
+	// frame, with the normal/binormal rotated by the artist's tilt
+	// (Curve3D::get_point_tilt) around the tangent. Makes tilt visible.
+	const float frame_axis_len = 0.10f;
+	PackedVector3Array frame_t_lines;
+	PackedVector3Array frame_n_lines;
+	PackedVector3Array frame_b_lines;
+	for (int ci = 0; ci < curves.size(); ++ci) {
+		Ref<Curve3D> c = curves[ci];
+		if (c.is_null()) continue;
+		const int n = c->get_point_count();
+		for (int ki = 0; ki < n; ++ki) {
+			const Vector3 origin = c->get_point_position(ki);
+			// Tangent: prefer outgoing, fall back to incoming.
+			Vector3 t_dir;
+			if (ki + 1 < n) {
+				t_dir = c->get_point_position(ki + 1) - origin;
+			} else if (ki - 1 >= 0) {
+				t_dir = origin - c->get_point_position(ki - 1);
+			} else {
+				t_dir = Vector3(1.0f, 0.0f, 0.0f);
+			}
+			const float tlen = t_dir.length();
+			if (tlen < 1e-6f) continue;
+			const Vector3 t = t_dir / tlen;
+			// Pick a reference up vector to derive an initial binormal —
+			// world Y when |t·Y| < 0.95, else world Z. Gram-Schmidt to
+			// get a plane perpendicular to t.
+			Vector3 ref_up(0.0f, 1.0f, 0.0f);
+			if (std::fabs(t.dot(ref_up)) > 0.95f) {
+				ref_up = Vector3(0.0f, 0.0f, 1.0f);
+			}
+			Vector3 b0 = ref_up - t * t.dot(ref_up);
+			const float blen = b0.length();
+			if (blen < 1e-6f) continue;
+			b0 = b0 / blen;
+			Vector3 n0 = t.cross(b0);
+			// Apply the artist's tilt: rotate (n0, b0) around t by tilt.
+			const float tilt = static_cast<float>(c->get_point_tilt(ki));
+			const float ct = std::cos(tilt);
+			const float st = std::sin(tilt);
+			const Vector3 b = b0 * ct + n0 * st;
+			const Vector3 nv = -b0 * st + n0 * ct;
+			frame_t_lines.push_back(origin);
+			frame_t_lines.push_back(origin + t  * frame_axis_len);
+			frame_n_lines.push_back(origin);
+			frame_n_lines.push_back(origin + nv * frame_axis_len);
+			frame_b_lines.push_back(origin);
+			frame_b_lines.push_back(origin + b  * frame_axis_len);
+		}
+	}
+	if (frame_t_lines.size() > 0) {
+		p_gizmo->add_lines(frame_t_lines, get_material("frame_t", p_gizmo), false,
+			Color(1.0f, 0.3f, 0.3f, 1.0f));
+	}
+	if (frame_n_lines.size() > 0) {
+		p_gizmo->add_lines(frame_n_lines, get_material("frame_n", p_gizmo), false,
+			Color(0.3f, 1.0f, 0.3f, 1.0f));
+	}
+	if (frame_b_lines.size() > 0) {
+		p_gizmo->add_lines(frame_b_lines, get_material("frame_b", p_gizmo), false,
+			Color(0.3f, 0.5f, 1.0f, 1.0f));
 	}
 
 	// Projection links: from each merged knot to its closest mesh vertex
