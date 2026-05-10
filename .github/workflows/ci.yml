@@ -1,0 +1,81 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  lean-and-slang:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache .elan + lake-packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.elan
+            lean/.lake/packages
+            lean/.lake/build
+          key: elan-lake-${{ hashFiles('lean/lean-toolchain', 'lean/lake-manifest.json') }}
+
+      - name: Install elan / Lean
+        run: |
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: lake build
+        working-directory: lean
+        run: lake build
+
+      - name: Cache Slang toolchain
+        uses: actions/cache@v4
+        with:
+          path: bin/.slang
+          key: slang-${{ hashFiles('misc/install-slang.sh') }}
+
+      - name: Fetch slangc
+        run: |
+          if [ ! -x bin/.slang/bin/slangc ]; then
+            misc/install-slang.sh
+          fi
+          bin/slangc -v
+
+      - name: Emit every Slang kernel
+        working-directory: lean
+        run: |
+          mkdir -p /tmp/emitted_shaders
+          lake exe emit_shaders /tmp/emitted_shaders
+
+      - name: slangc -target spirv round-trip on all kernels
+        run: |
+          ok=0; total=0; failed=
+          for f in /tmp/emitted_shaders/*.slang; do
+            total=$((total+1))
+            spv="${f%.slang}.spv"
+            if bin/slangc -target spirv -profile sm_6_5 -stage compute \
+                 -entry main -o "$spv" "$f" 2>/tmp/slangc_err.log; then
+              magic=$(xxd -l 4 -p "$spv")
+              size=$(stat -c%s "$spv")
+              if [ "$magic" = "03022307" ] && [ "$size" -gt 100 ]; then
+                ok=$((ok+1))
+              else
+                failed="$failed $(basename "$f"):bad-spirv"
+              fi
+            else
+              failed="$failed $(basename "$f"):slangc-fail"
+              cat /tmp/slangc_err.log | head -5
+            fi
+          done
+          echo "$ok / $total kernels round-trip to SPIR-V"
+          if [ -n "$failed" ]; then
+            echo "FAILED:$failed"
+            exit 1
+          fi
+
+      - name: Real-input validators (slangc -target cpp + clang + run)
+        run: make -C tests/slang_validate test
