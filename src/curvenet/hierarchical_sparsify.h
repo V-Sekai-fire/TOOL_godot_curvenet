@@ -526,6 +526,10 @@ inline Hierarchy build_hierarchy(const Graph &fine,
         const Graph base = (sparsify_tau > 0.0)
             ? sparsify_graph(cur, sparsify_tau) : cur;
         const auto t1 = std::chrono::steady_clock::now();
+        // Tested: per-level max_degree shrinkage (24 → 16 → 8 with
+        // depth) cut V-cycle apply by 12% but raised PCG iter
+        // count from 9 to 15 — net loss. Flat max_degree across
+        // levels is the right call for this matrix.
         const CoarsenLevel lev = coarsen_one_level(base, max_degree);
         const auto t2 = std::chrono::steady_clock::now();
         if (lev.coarse.num_verts == 0 ||
