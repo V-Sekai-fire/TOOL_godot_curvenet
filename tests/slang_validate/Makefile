@@ -8,6 +8,10 @@
 #   3. asserts the output matches an independent reference.
 #
 # `make test` runs every harness; non-zero exit on any failure.
+#
+# Tests are listed as `<test_name>:<kernel_name>` pairs so multiple
+# tests can share the same kernel emit (e.g., axpy_test and
+# mire_axpy_test both link axpy_emit.cpp).
 
 REPO_ROOT  := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../..)
 SLANGC     := $(REPO_ROOT)/bin/slangc
@@ -22,9 +26,15 @@ CXX        ?= clang++
 CXXFLAGS   ?= -std=c++17 -O2 -Wall -Wextra -Wno-unused-parameter
 INCLUDES   := -I$(SLANG_DIR)/include -I$(EMITTED)
 
-KERNELS    := axpy saxpby jacobi
+# Per-test-to-kernel mapping. test_name → kernel_name.
+TESTS      := axpy:axpy saxpby:saxpby jacobi:jacobi mire_axpy:axpy
+
+TEST_NAMES := $(foreach t,$(TESTS),$(word 1,$(subst :, ,$(t))))
+KERNEL_FOR  = $(word 2,$(subst :, ,$(filter $(1):%,$(TESTS))))
+
+KERNELS    := $(sort $(foreach t,$(TESTS),$(word 2,$(subst :, ,$(t)))))
 SHADERS    := $(addprefix $(EMITTED)/,$(addsuffix _emit.cpp,$(KERNELS)))
-BINS       := $(addprefix $(EMITTED)/,$(addsuffix _test,$(KERNELS)))
+BINS       := $(addprefix $(EMITTED)/,$(addsuffix _test,$(TEST_NAMES)))
 
 .PHONY: test clean emit-shaders
 
@@ -46,8 +56,10 @@ $(EMITTED)/%_emit.cpp: emit-shaders
 	$(SLANGC) -target cpp -stage compute -entry main \
 	  -o $@ /tmp/emitted_shaders/$*.slang
 
-# test harness + kernel cpp → executable.
-$(EMITTED)/%_test: %_test.cpp $(EMITTED)/%_emit.cpp
+# Per-test build rule. Each test_name maps to a kernel_name via the
+# TESTS list; the test source #include's its kernel's emit.
+.SECONDEXPANSION:
+$(EMITTED)/%_test: %_test.cpp $$(EMITTED)/$$(call KERNEL_FOR,%)_emit.cpp
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $<
 
 clean:
