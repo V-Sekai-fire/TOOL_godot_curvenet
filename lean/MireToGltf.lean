@@ -127,6 +127,51 @@ def readFp32LE (xs : ByteArray) (base : Nat) : Float :=
   let bits : UInt32 := b0 ||| (b1 <<< 8) ||| (b2 <<< 16) ||| (b3 <<< 24)
   fp32BitsToFloat bits
 
+/-- Encode an fp32 bit pattern as four little-endian bytes appended
+    to `acc`. Hand-rolled because Lean's `Float` is fp64 and there's
+    no built-in fp32 round-trip. Subnormals collapse to zero. -/
+def fp32ToLEBytes (acc : ByteArray) (f : Float) : ByteArray :=
+  let bits : UInt32 :=
+    if f == 0.0 then 0
+    else
+      let sign : UInt32 := if f < 0.0 then 0x80000000 else 0
+      let af := f.abs
+      -- exp = floor(log2(af))   (Float.toInt64 truncates toward zero,
+      -- so we apply Float.floor first to get true floor for negatives.)
+      let e0 := Float.log2 af
+      let e := (Float.floor e0).toInt64.toInt
+      let scale := Float.pow 2.0 (-(Float.ofInt e))
+      let mantNorm := af * scale  -- in [1.0, 2.0)
+      let mantFrac := mantNorm - 1.0
+      let mantBits : UInt32 :=
+        (mantFrac * Float.pow 2.0 23.0).toUInt32
+      let biased : Int := e + 127
+      if biased ≤ 0 then
+        sign  -- underflow → 0
+      else if biased ≥ 0xFF then
+        sign ||| ((0xFF : UInt32) <<< 23)  -- overflow → ±inf
+      else
+        sign ||| (biased.toNat.toUInt32 <<< 23) ||| (mantBits &&& 0x7FFFFF)
+  acc.push (bits &&& 0xFF).toUInt8
+     |>.push ((bits >>> 8)  &&& 0xFF).toUInt8
+     |>.push ((bits >>> 16) &&& 0xFF).toUInt8
+     |>.push ((bits >>> 24) &&& 0xFF).toUInt8
+
+/-- Convert a Z-up positions buffer (Mire / Blender convention) into
+    the Y-up convention glTF requires by mapping each vertex
+    `(X, Y, Z) → (X, Z, -Y)` (a -90° rotation around X). -/
+def zupToYup (xs : ByteArray) : ByteArray := Id.run do
+  let n := xs.size / 12
+  let mut out : ByteArray := ByteArray.empty
+  for i in [:n] do
+    let x := readFp32LE xs (12*i + 0)
+    let y := readFp32LE xs (12*i + 4)
+    let z := readFp32LE xs (12*i + 8)
+    out := fp32ToLEBytes out x
+    out := fp32ToLEBytes out z
+    out := fp32ToLEBytes out (-y)
+  return out
+
 /-- Min/max accessor stats over a flat float buffer with 3-component
     stride. Returns 3-vec min, 3-vec max. -/
 def vec3MinMax (xs : ByteArray) : Array Float × Array Float := Id.run do
@@ -150,16 +195,22 @@ def vec3MinMax (xs : ByteArray) : Array Float × Array Float := Id.run do
 def main (args : List String) : IO UInt32 := do
   match args with
   | positionsPath :: trisPath :: outPath :: _ => do
-    let positions ← readPadded4 positionsPath
-    let tris      ← readPadded4 trisPath
-    let nVerts := positions.size / 12
+    let positionsRaw ← readPadded4 positionsPath
+    let tris         ← readPadded4 trisPath
+    let nVerts := positionsRaw.size / 12
     let nTris  := tris.size / 12
     if nVerts = 0 then
       IO.eprintln "no vertices in positions buffer"
       return 1
+    -- Mire data is authored Z-up (Blender / Godot / common DCC
+    -- convention); glTF 2.0 requires Y-up. Re-encode the position
+    -- buffer with `(X, Y, Z) → (X, Z, -Y)` so importers don't apply
+    -- their Y-up→Z-up rotation to data that's already Z-up (which
+    -- would land the character on its back).
+    let positions := zupToYup positionsRaw
     let (pmin, pmax) := vec3MinMax positions
 
-    -- Layout: [ positions | tris ]
+    -- Layout: [ positions (Y-up) | tris ]
     let posOffset : Nat := 0
     let triOffset : Nat := positions.size
     let bin : ByteArray := positions ++ tris
