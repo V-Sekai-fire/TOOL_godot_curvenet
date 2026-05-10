@@ -36,8 +36,11 @@ is left as a follow-up; tests in this slice avoid the degenerate case.
 -/
 
 import Curvenet.Vec3
+import Curvenet.Common
 
 namespace Curvenet
+
+open Curvenet.Common
 namespace IntersectionFrames
 
 /-- Outgoing segment from an intersection: a unit tangent and a length. -/
@@ -128,9 +131,6 @@ def perSideWidths (segs : Array OutgoingSegment) :
     let wMinus := li + cMagM * (liM - li)
     acc := acc.set! i (wPlus, wMinus)
   return acc
-
-/-- 3×3 row-major matrix stored as a 9-element Float array. -/
-abbrev Mat3 := Array Float
 
 /-- DeGoes22 §3 per-side scaled frame
        B_i S_i = [ t_i · l_i  |  b_i · w_i  |  n_i · h_i ]

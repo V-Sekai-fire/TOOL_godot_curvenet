@@ -33,11 +33,12 @@ during column-j elimination, only update entries `L[i,j]` where
 so the backsolves cost the same per iter as one A·x mat-vec.
 -/
 
-namespace Curvenet
-namespace IncompleteCholesky
+import Curvenet.Common
 
-/-- A dense 3×3 matrix as nine Floats in row-major order. -/
-abbrev Mat3 := Array Float
+namespace Curvenet
+
+open Curvenet.Common
+namespace IncompleteCholesky
 
 private def at3 (M : Mat3) (i j : Nat) : Float := M[3 * i + j]!
 
@@ -99,8 +100,6 @@ def backwardSub3 (L : Mat3) (y : Array Float) : Array Float := Id.run do
     x := x.set! i (s / L[3 * i + i]!)
   return x
 
-/-- Tolerance-aware Float equality. -/
-def fclose (x y eps : Float) : Bool := (x - y).abs < eps
 
 /-- Mat3 vs Mat3 close (entry-wise). -/
 def mat3Close (M N : Mat3) (eps : Float) : Bool := Id.run do

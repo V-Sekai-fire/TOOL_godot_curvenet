@@ -14,6 +14,7 @@ Modules organised by §:
   HarmonicSolve, DeformSolve      — §4.3 two-stage solve
 -/
 
+import Curvenet.Common
 import Curvenet.Vec3
 import Curvenet.Halfedge
 import Curvenet.HalfedgeBuilder

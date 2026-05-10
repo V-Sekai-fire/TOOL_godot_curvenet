@@ -37,7 +37,11 @@ The bind-time weight bake is specced in a follow-up file once
 the runtime kernel is locked.
 -/
 
+import Curvenet.Common
+
 namespace Curvenet
+
+open Curvenet.Common
 namespace DirectDeltaMush
 
 /-- A 4×4 affine transform as 16 floats in row-major order.
@@ -93,8 +97,6 @@ def lbsMatvec (transforms : Array Mat4)
     z := z + w * tz
   return (x, y, z)
 
-/-- Tolerance-aware Float compare. -/
-def fclose (a b eps : Float) : Bool := (a - b).abs < eps
 
 /-- 3-vector close. -/
 def vclose (a b : Float × Float × Float) (eps : Float) : Bool :=

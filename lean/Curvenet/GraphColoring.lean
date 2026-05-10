@@ -29,11 +29,12 @@ Native-decide checks verify each vertex's color differs from
 all its neighbors.
 -/
 
-namespace Curvenet
-namespace GraphColoring
+import Curvenet.Common
 
-/-- Adjacency: per-vertex list of neighbor indices. -/
-abbrev Adjacency := Array (Array Nat)
+namespace Curvenet
+
+open Curvenet.Common
+namespace GraphColoring
 
 /-- Greedy coloring: walk vertices in index order, assign each
    the smallest color id not used by any earlier neighbor. -/

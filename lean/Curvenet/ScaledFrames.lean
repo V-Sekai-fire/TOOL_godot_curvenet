@@ -29,8 +29,11 @@ case is degenerate and a future slice will pick a stable axis.
 -/
 
 import Curvenet.Vec3
+import Curvenet.Common
 
 namespace Curvenet
+
+open Curvenet.Common
 namespace ScaledFrames
 
 /-- Tangent (unit) and length of a segment from `p` to `q`. -/
@@ -39,9 +42,6 @@ def tangentLength (p q : Vec3) : Vec3 × Float :=
   let l : Float := (d.x * d.x + d.y * d.y + d.z * d.z).sqrt
   let inv := if l == 0.0 then 0.0 else 1.0 / l
   (⟨d.x * inv, d.y * inv, d.z * inv⟩, l)
-
-/-- 3×3 row-major matrix, stored as a 9-element Float array. -/
-abbrev Mat3 := Array Float
 
 @[inline] def mat3Get (m : Mat3) (i j : Nat) : Float := m[i * 3 + j]!
 @[inline] def mat3Mk (m00 m01 m02 m10 m11 m12 m20 m21 m22 : Float) : Mat3 :=
@@ -152,6 +152,7 @@ end ScaledFrames
 
 namespace ScaledFramesExamples
 
+open Curvenet.Common
 open ScaledFrames
 
 private def origin : Vec3 := ⟨0.0, 0.0, 0.0⟩
