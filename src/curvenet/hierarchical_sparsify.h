@@ -176,6 +176,159 @@ inline sparse::SparseMatrixCSR graph_to_csr(const Graph &g) {
     return out;
 }
 
+// Greedy maximum-independent-set selection of "F-points" — the
+// vertices to eliminate at this level. A vertex is selected as
+// F when it has no F-neighbors yet; all its neighbors are then
+// marked as C-points (kept at the next level).
+//
+// Walks vertices in degree-ascending order so that the densest
+// vertices stay as C-points and sparse vertices get eliminated —
+// gives well-conditioned coarse problems on triangle meshes.
+//
+// Returns a vector<char> (acts as bool) of length num_verts:
+//   1 = F-point (will be eliminated)
+//   0 = C-point (will be kept at next level)
+inline std::vector<char> select_independent_set(const Graph &g) {
+    const std::size_t n = g.num_verts;
+    // Build adjacency lists.
+    std::vector<std::vector<int>> adj(n);
+    for (const auto &e : g.edges) {
+        adj[std::get<0>(e)].push_back(std::get<1>(e));
+        adj[std::get<1>(e)].push_back(std::get<0>(e));
+    }
+    // Sort vertex order by degree ascending for greedy IS.
+    std::vector<int> order(n);
+    for (std::size_t i = 0; i < n; ++i) order[i] = static_cast<int>(i);
+    std::sort(order.begin(), order.end(),
+                 [&](int a, int b) { return adj[a].size() < adj[b].size(); });
+
+    std::vector<char> mark(n, 0);   // 0 = unmarked, 1 = F, 2 = C
+    for (int v : order) {
+        if (mark[v] != 0) continue;
+        // No F-neighbor by definition (F's neighbors are marked 2).
+        mark[v] = 1;   // F
+        for (int nb : adj[v]) if (mark[nb] == 0) mark[nb] = 2;   // C
+    }
+    std::vector<char> is_F(n, 0);
+    for (std::size_t i = 0; i < n; ++i) is_F[i] = (mark[i] == 1) ? 1 : 0;
+    return is_F;
+}
+
+// One coarsening level: starting from `g`, eliminate every F-point
+// (in the order they appear in `is_F`) via Schur compensation,
+// returning a coarsened graph that still uses the original
+// vertex indexing (eliminated vertices remain in num_verts but
+// have no incident edges) plus a list of the surviving C-points
+// in original-index order.
+//
+// Because F is an independent set, eliminating F-points in any
+// order yields the same Schur-complement Laplacian on C-points.
+struct CoarsenLevel {
+    Graph                coarse;       // Laplacian on C-points (still indexed in original space)
+    std::vector<int>     c_to_orig;    // length = #C-points; coarse-index -> original-index
+    std::vector<int>     orig_to_c;    // length = num_verts;  original-index -> coarse-index, or -1
+    std::vector<char>    is_F;         // saved for prolongation construction
+};
+
+inline CoarsenLevel coarsen_one_level(const Graph &g) {
+    CoarsenLevel out;
+    out.is_F = select_independent_set(g);
+    Graph cur = g;
+    for (std::size_t v = 0; v < g.num_verts; ++v) {
+        if (out.is_F[v]) cur = eliminate_vertex(cur, static_cast<int>(v));
+    }
+    // Build the C-mapping.
+    out.orig_to_c.assign(g.num_verts, -1);
+    out.c_to_orig.reserve(g.num_verts);
+    for (std::size_t v = 0; v < g.num_verts; ++v) {
+        if (!out.is_F[v]) {
+            out.orig_to_c[v] = static_cast<int>(out.c_to_orig.size());
+            out.c_to_orig.push_back(static_cast<int>(v));
+        }
+    }
+    // Compact `cur`: rename vertex indices to the C-only space and
+    // strip out edges that touch (now-isolated) F-points.
+    Graph compact;
+    compact.num_verts = out.c_to_orig.size();
+    compact.edges.reserve(cur.edges.size());
+    for (const auto &e : cur.edges) {
+        const int a = std::get<0>(e);
+        const int b = std::get<1>(e);
+        const int ca = out.orig_to_c[a];
+        const int cb = out.orig_to_c[b];
+        if (ca >= 0 && cb >= 0 && ca != cb) {
+            compact.edges.push_back({ std::min(ca, cb), std::max(ca, cb), std::get<2>(e) });
+        }
+    }
+    out.coarse = std::move(compact);
+    return out;
+}
+
+// Sparse prolongation matrix from C-points (coarse, n_c) to all
+// vertices (fine, n_f). Stored as a list of (fine_idx, coarse_idx,
+// weight) triples. For a C-point v: one entry (v, c_of(v), 1.0).
+// For an F-point v: one entry per C-neighbor c, with weight
+// w(v, c) / sum of w(v, c') over C-neighbors.
+struct Prolongation {
+    std::size_t                                  n_fine = 0;
+    std::size_t                                  n_coarse = 0;
+    std::vector<std::tuple<int, int, double>>   triples;  // (fine, coarse, w)
+};
+
+inline Prolongation make_prolongation(const Graph &g, const CoarsenLevel &lev) {
+    Prolongation P;
+    P.n_fine = g.num_verts;
+    P.n_coarse = lev.c_to_orig.size();
+    // Build adjacency.
+    std::vector<std::vector<std::pair<int, double>>> adj(g.num_verts);
+    for (const auto &e : g.edges) {
+        const int u = std::get<0>(e);
+        const int v = std::get<1>(e);
+        const double w = std::get<2>(e);
+        adj[u].push_back({ v, w });
+        adj[v].push_back({ u, w });
+    }
+    for (std::size_t v = 0; v < g.num_verts; ++v) {
+        if (!lev.is_F[v]) {
+            P.triples.push_back({ static_cast<int>(v), lev.orig_to_c[v], 1.0 });
+        } else {
+            double sum_c = 0.0;
+            for (auto &kv : adj[v]) if (!lev.is_F[kv.first]) sum_c += kv.second;
+            if (sum_c == 0.0) continue;   // orphan F-point: leave at 0
+            for (auto &kv : adj[v]) {
+                if (!lev.is_F[kv.first]) {
+                    P.triples.push_back({
+                        static_cast<int>(v),
+                        lev.orig_to_c[kv.first],
+                        kv.second / sum_c
+                    });
+                }
+            }
+        }
+    }
+    return P;
+}
+
+// y = P · x (size n_fine), x is size n_coarse.
+inline std::vector<double> prolong(const Prolongation &P,
+                                       const std::vector<double> &x) {
+    std::vector<double> y(P.n_fine, 0.0);
+    for (const auto &t : P.triples) {
+        y[std::get<0>(t)] += std::get<2>(t) * x[std::get<1>(t)];
+    }
+    return y;
+}
+
+// y = P^T · x (size n_coarse), x is size n_fine.
+inline std::vector<double> restrict_pt(const Prolongation &P,
+                                            const std::vector<double> &x) {
+    std::vector<double> y(P.n_coarse, 0.0);
+    for (const auto &t : P.triples) {
+        y[std::get<1>(t)] += std::get<2>(t) * x[std::get<0>(t)];
+    }
+    return y;
+}
+
 } // namespace hsc
 } // namespace curvenet
 

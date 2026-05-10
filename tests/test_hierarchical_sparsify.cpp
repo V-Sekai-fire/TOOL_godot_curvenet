@@ -98,5 +98,74 @@ int main() {
         RC_ASSERT(L2.rows == 4u);   // vertex 1 still indexed but isolated
     });
 
+    // Independent-set selection: F's must form an independent set
+    // (no two F's adjacent) and every vertex is either F or has
+    // an F-neighbor (or is isolated).
+    ok &= rc::check("F-points form an independent set on a 4-path", [] {
+        // Path 0-1-2-3.
+        hsc::Graph g;
+        g.num_verts = 4;
+        g.edges = { { 0, 1, 1.0 }, { 1, 2, 1.0 }, { 2, 3, 1.0 } };
+        const auto is_F = hsc::select_independent_set(g);
+        for (const auto &e : g.edges) {
+            const int a = std::get<0>(e);
+            const int b = std::get<1>(e);
+            // No adjacent F-pair.
+            RC_ASSERT(!(is_F[a] && is_F[b]));
+        }
+    });
+
+    // Coarsening level: after eliminating one independent-set
+    // worth of vertices on the 4-path, the surviving graph has
+    // valid Laplacian structure.
+    ok &= rc::check("coarsen_one_level on 4-path produces valid coarse graph", [] {
+        hsc::Graph g;
+        g.num_verts = 4;
+        g.edges = { { 0, 1, 1.0 }, { 1, 2, 1.0 }, { 2, 3, 1.0 } };
+        const auto lev = hsc::coarsen_one_level(g);
+        // C-only graph has fewer (or equal) vertices than original.
+        RC_ASSERT(lev.coarse.num_verts < g.num_verts);
+        // c_to_orig and orig_to_c are consistent.
+        for (std::size_t c = 0; c < lev.coarse.num_verts; ++c) {
+            const int orig = lev.c_to_orig[c];
+            RC_ASSERT(lev.orig_to_c[orig] == static_cast<int>(c));
+        }
+    });
+
+    // Prolongation is row-stochastic: each fine row's weights
+    // sum to 1 (C-points trivially, F-points via normalisation).
+    ok &= rc::check("prolongation is row-stochastic on 4-path", [] {
+        hsc::Graph g;
+        g.num_verts = 4;
+        g.edges = { { 0, 1, 1.0 }, { 1, 2, 1.0 }, { 2, 3, 1.0 } };
+        const auto lev = hsc::coarsen_one_level(g);
+        const auto P = hsc::make_prolongation(g, lev);
+        std::vector<double> rowsum(P.n_fine, 0.0);
+        for (const auto &t : P.triples) {
+            rowsum[std::get<0>(t)] += std::get<2>(t);
+        }
+        for (std::size_t i = 0; i < P.n_fine; ++i) {
+            // Either 1.0 (covered) or 0.0 (orphan F-point).
+            RC_ASSERT(std::fabs(rowsum[i] - 1.0) < 1e-12 || rowsum[i] == 0.0);
+        }
+    });
+
+    // P · 1_coarse = 1_fine (constant prolongs to constant).
+    ok &= rc::check("P prolongs constant vectors to constant", [] {
+        hsc::Graph g;
+        g.num_verts = 5;
+        g.edges = {
+            { 0, 1, 1.0 }, { 1, 2, 1.0 }, { 2, 3, 1.0 }, { 3, 4, 1.0 }
+        };
+        const auto lev = hsc::coarsen_one_level(g);
+        const auto P = hsc::make_prolongation(g, lev);
+        std::vector<double> ones_c(P.n_coarse, 1.0);
+        const auto fine = hsc::prolong(P, ones_c);
+        for (std::size_t i = 0; i < P.n_fine; ++i) {
+            // Same caveat: orphan F's have rowsum 0.
+            RC_ASSERT(std::fabs(fine[i] - 1.0) < 1e-12 || fine[i] == 0.0);
+        }
+    });
+
     return ok ? 0 : 1;
 }
