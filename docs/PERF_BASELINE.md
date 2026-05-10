@@ -325,6 +325,70 @@ start from one frame's actual deformer output to the next.
 
 Reproducer: `make -C tests bench_5k_icc`.
 
+### HSC (loops 100/10–100/16) — wired but not dominant at 5k
+
+After loops 100/7-9 ruled out GPU/relaxed-tol/block-CG/intrinsic-
+Delaunay and the impossibility analysis (docs/IMPOSSIBILITY.md)
+showed iterative methods cannot reach 5 ms with anything we'd
+already tried, the path was Krishnan-Fattal-Szeliski 2013 HSC
+(`KrishnanFattalSzeliski2013HSC` in references.bib): Schur
+compensation gives O(1)-conditioned coarse problems where the
+multilevel Schwarz family stalled.
+
+Eight cycles delivered the full pipeline:
+
+  1. Lean spec (`lean/Curvenet/HierarchicalSparsifyCompensate.lean`,
+     8 native_decide proofs of `eliminateVertex` on path/star/
+     triangle-plus-leaf graphs)
+  2. C++ mirror `hsc::eliminate_vertex` + CSR roundtrip
+  3. `select_independent_set` (degree-asc IS) +
+     `coarsen_one_level` + Prolongation construct + apply
+  4. `Hierarchy` build + V-cycle apply (Jacobi smoother,
+     direct-equivalent CG at coarsest level)
+  5. `cg_hsc_with_guess` PCG wrapper
+  6. Bench at 5k vs ICC + D-Jacobi
+  7. Optimised `eliminate_vertex` with hash-map index
+  8. Doc + retraction of 81k bench
+
+Bench at 5k (single-RHS, tol=1e-8, all PCG variants):
+
+| solver               | wall (ms) | residual  |
+|----------------------|----------:|----------:|
+| D-Jacobi PCG         |     58    | 9.3e-9    |
+| ICC(0)-PCG           |     **43**    | 7.9e-9    |
+| HSC-PCG (V-cycle)    |     46    | 3.8e-9    |
+
+HSC converges to better residual than ICC at similar wall time
+but **doesn't beat ICC at 5k**. Two diagnosed issues:
+
+1. **Hierarchy too tall**. 16 levels (5485 → 3945 → ... → 887)
+   with only ~30% coarsening per level. Mire's mesh-Laplacian
+   maximum-independent-set density is naturally low (~25-30%);
+   each V-cycle traverses 16 levels of Jacobi smoothing + SpMV.
+   Per-V-cycle cost swamps the iter-count savings on small n.
+
+2. **Hierarchy build O(n · L · deg²)**. ~1.5-2.7 s build at 5k,
+   would scale to ~5+ minutes at 81k. The 81k bench is
+   intentionally not run.
+
+For Gall's law the infrastructure is in place (correct, tested,
+working) but the implementation is too slow for production at
+scale. Optimisation paths flagged for future loops:
+
+* Replace degree-asc greedy IS with Krishnan's randomised
+  weight-based F-selection — should hit ~50% per level → 4-5
+  level hierarchy at 81k vs 22+ now.
+* Batch F-elimination at IS granularity rather than one vertex
+  at a time (eliminate the entire IS in one pass).
+* Use a sparse adjacency map keyed on (lo, hi) instead of edge
+  list for O(deg²) per-vertex elim cost.
+
+Current state: HSC is the recommended solver path forward
+algorithmically, but our implementation isn't yet faster than
+ICC. ICC stays as production until HSC optimisation lands.
+
+Reproducer: `make -C tests bench_hsc_5k`.
+
 ### Wired into the deformer ✓ (loop 100/4)
 
 `CurveNetDeformer3D` now exposes a `use_incomplete_cholesky`
