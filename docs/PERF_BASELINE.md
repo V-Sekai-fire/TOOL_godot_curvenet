@@ -176,11 +176,13 @@ at bind, which adds a small constant.
 
 ## Chebyshev acceleration on the meshlet Schwarz path
 
-`tests/diag_meshlet_chebyshev_5k.cpp` wraps the per-meshlet
-multiplicative-Schwarz outer iteration with Wang 2015's Chebyshev
-semi-iterative recurrence (`src/curvenet/chebyshev_accel.h`,
-mirroring `lean/Curvenet/ChebyshevAccel.lean`). On the 5k Mire
-body with synthetic SPD-projected RHS, tol 1e-9:
+> **Archived.** Spec, mirror, and reproducer now live in
+> [TOOL_godot_curvenet_archive](https://github.com/V-Sekai-fire/TOOL_godot_curvenet_archive)
+> (`tests/diag_meshlet_chebyshev_5k.cpp`,
+> `src/curvenet/chebyshev_accel.h`, `lean/Curvenet/ChebyshevAccel.lean`).
+> Retired after stalling on 81k — see "Dead ends" below.
+
+On the 5k Mire body with synthetic SPD-projected RHS, tol 1e-9:
 
 | Configuration                   | Outer iters to 1e-9 |
 |---------------------------------|---------------------|
@@ -235,9 +237,10 @@ converges.
 
 Three rounds of preconditioner work all hit the same plateau at
 L_inf residual ~3.7 on the 81k Mire cut-mesh Laplacian. Files
-remain in tree with TOMBSTONE headers:
+moved to [TOOL_godot_curvenet_archive](https://github.com/V-Sekai-fire/TOOL_godot_curvenet_archive)
+with TOMBSTONE headers preserved:
 
-| Loop      | Hypothesis                                     | Verdict                                          | Tombstoned files |
+| Loop      | Hypothesis                                     | Verdict                                          | Archived files |
 |-----------|-------------------------------------------------|---------------------------------------------------|------------------|
 | 8         | Recursive multilevel beats 2-level on 81k      | False — 5-level stalls at 3.7                     | `multi_level_schwarz.{h,lean}` |
 | 100/1     | HEM connectivity-aware coarsening helps        | False — 7-level HEM stalls at 3.7                 | `heavy_edge_matching.{h,lean}` |
@@ -257,16 +260,18 @@ rows are over-relaxed, large-D rows are under-relaxed. Plain CG's
 implicit per-iter scaling at least homogenizes; discrete Jacobi
 sweeps don't.
 
-The `two_level_schwarz` and `chebyshev_accel` modules also carry
-TOMBSTONE headers — they pass their unit tests and converged at
-5k, but every 81k variant of either stalls at the same plateau.
+The `two_level_schwarz` and `chebyshev_accel` modules carry
+TOMBSTONE headers in the archive — they pass their unit tests and
+converged at 5k, but every 81k variant of either stalls at the same
+plateau.
 
 Don't reuse any of these on a real mesh until the smoother is
 swapped for one robust to wide diagonal ranges (sym-GS, or
 D^{-1/2}·A·D^{-1/2} symmetric scaling per level), and that
 smoother is verified in isolation on the 81k matrix first.
 
-The reproducer for the stall is `tests/diag_multi_level_schwarz_70k`.
+The reproducer for the stall (`diag_multi_level_schwarz_70k`) is in
+the archive repo.
 The earlier 70k Chebyshev and 2-level Schwarz diags were removed
 as redundant.
 
@@ -433,7 +438,9 @@ For desktop PCVR with 8-12 P-cores: 5k parallel HSC clears the
 last bandwidth ceiling for character-mesh-sized problems. 81k+
 remains direct-Cholesky territory if the 5 ms target is firm.
 
-Reproducer: `make -C tests bench_hsc_parallel_5k bench_hsc_parallel_81k`.
+Reproducer: `make -C tests bench_hsc_parallel_5k`. The 81k variant
+(`bench_hsc_parallel_81k`) is archived alongside the retired
+multilevel-Schwarz family.
 
 ### HSC FINAL — beats ICC at every scale measured ✓
 
@@ -680,8 +687,8 @@ This is the first preconditioner that beats plain CG on 81k since
 the project began. Six earlier attempts (1-/2-/3-/5-/7-level
 Schwarz; HEM; kernel projection; Chebyshev) were all worse than
 no preconditioner — see "Dead ends" above and the TOMBSTONE
-headers in `src/curvenet/{two_level,multi_level,heavy_edge_matching,
-kernel_projection,chebyshev_accel}.h`.
+headers in the [archive repo](https://github.com/V-Sekai-fire/TOOL_godot_curvenet_archive)
+under `src/curvenet/{two_level_schwarz,multi_level_schwarz,heavy_edge_matching,kernel_projection,chebyshev_accel}.h`.
 
 Reproducer: `make -C tests diag_70k_icc_pcg`.
 
@@ -749,8 +756,11 @@ Loop-100/2 also added kernel projection (`zero_mean_in_place`) on
 the V-cycle correction. Lean spec + 6 native_decide proofs +
 5 RC props, mirrored to `src/curvenet/kernel_projection.h`. Did
 not break 5k convergence (168 iters preserved) and was harmless
-on 81k (still stalls at 3.7). Kept in the tree because it's
-load-bearing infrastructure for any future kernel-aware variant.
+on 81k (still stalls at 3.7). The Lean module + standalone header
+moved to the [archive repo](https://github.com/V-Sekai-fire/TOOL_godot_curvenet_archive);
+the 7-line `zero_mean_in_place` helper is inlined into
+`incomplete_cholesky.h` since ICC's warm-start drift fix still
+calls it.
 
 Next loop: replace Jacobi smoother with one that handles wide
 diagonal ranges — symmetric Gauss-Seidel, or symmetric diagonal
