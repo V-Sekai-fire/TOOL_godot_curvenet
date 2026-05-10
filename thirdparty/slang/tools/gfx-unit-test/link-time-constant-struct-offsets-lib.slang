@@ -1,1 +1,0 @@
-export static const int ARRAY_SIZE = 3;

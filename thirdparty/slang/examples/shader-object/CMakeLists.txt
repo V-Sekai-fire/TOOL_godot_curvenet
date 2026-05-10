@@ -1,1 +1,0 @@
-example(shader-object)
