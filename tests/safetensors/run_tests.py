@@ -9,9 +9,11 @@ For each vector in `tests/safetensors/vectors/`:
   4. Assert: same tensor key set, same dtype, same shape, byte-equal
      payloads, same metadata key/value pairs.
   5. As a separate smoke check, ask the reference `safetensors`
-     library to open the round-tripped file (skipping BF16-only
-     vectors that numpy can't materialize). Catches header
-     well-formedness regressions that the byte path might miss.
+     library to open the round-tripped file. `safe_open` + `keys()` +
+     `metadata()` validate the header structure and offsets for *every*
+     tensor including BF16; `get_tensor()` is skipped only on BF16 keys
+     because numpy lacks a bfloat16 dtype (the byte-level round-trip in
+     `_diff` already covers BF16 payloads).
 
 Run from anywhere; no args:
 
@@ -68,16 +70,25 @@ def _diff(a, b):
     return None
 
 
-def _has_bf16(tensors):
-    return any(d == "BF16" for d, _, _ in tensors.values())
-
-
-def _safetensors_lib_can_open(path: Path) -> str | None:
-    """Open with the reference library and return None on success, or
-    a description of the failure. Skips numpy-incompatible dtypes."""
+def _safetensors_lib_can_open(path: Path, raw_dtypes: dict[str, str]) -> str | None:
+    """Verify the reference `safetensors` library accepts the file:
+      - `safe_open` succeeds (header well-formedness)
+      - every tensor key is enumerable
+      - metadata is readable
+      - every NON-BF16 tensor materializes via numpy (validates byte
+        layout / offset alignment / dtype tag end-to-end)
+    BF16 tensors are skipped from the numpy materialization step only —
+    numpy lacks a bfloat16 dtype, so `get_tensor` raises `TypeError:
+    data type 'bfloat16' not understood`. Their structural correctness
+    is covered by `safe_open` + `keys()` and the byte-level diff in
+    `_diff`. Returns None on success or a description of the failure."""
     try:
         with safe_open(str(path), framework="numpy") as s:
-            for k in s.keys():
+            keys = list(s.keys())
+            _md = dict(s.metadata() or {})
+            for k in keys:
+                if raw_dtypes.get(k) == "BF16":
+                    continue
                 _ = s.get_tensor(k)
         return None
     except Exception as e:  # noqa: BLE001
@@ -119,14 +130,19 @@ def main() -> int:
             continue
 
         # Separate smoke: ref lib accepts the round-tripped file.
-        if _has_bf16(a_t):
-            lib_msg = "skip-bf16"
-        else:
-            err = _safetensors_lib_can_open(rt)
-            if err is not None:
-                fails.append((vf.name, f"ref lib rejected rt file: {err}"))
-                continue
-            lib_msg = "lib-ok"
+        # Pass dtypes from the byte-level parse so we can skip BF16
+        # tensors from the numpy materialization step (only that step
+        # — `safe_open`, `keys()`, `metadata()` cover BF16 too).
+        raw_dtypes = {k: v[0] for k, v in b_t.items()}
+        err = _safetensors_lib_can_open(rt, raw_dtypes)
+        if err is not None:
+            fails.append((vf.name, f"ref lib rejected rt file: {err}"))
+            continue
+        bf16_keys = sum(1 for d in raw_dtypes.values() if d == "BF16")
+        lib_msg = (
+            f"lib-ok ({bf16_keys} BF16 structural)" if bf16_keys
+            else "lib-ok"
+        )
 
         print(
             f"PASS  {vf.name:30s}  "
