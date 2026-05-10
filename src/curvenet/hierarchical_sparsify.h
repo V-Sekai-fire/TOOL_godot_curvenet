@@ -827,6 +827,230 @@ inline std::vector<double> cg_hsc_with_guess(
     return x;
 }
 
+// Block (multi-RHS) symmetric Gauss-Seidel smoother. X, B are
+// row-major n × k. Each row i is updated against all k RHS in
+// lockstep, sharing the matrix's row data load (memory-amortised).
+inline void sym_gauss_seidel_smooth_block(const sparse::SparseMatrixCSR &A,
+                                                   const std::vector<double> &diag,
+                                                   const std::vector<double> &B,
+                                                   std::vector<double> &X,
+                                                   std::size_t k,
+                                                   std::size_t nu) {
+    const std::size_t n = A.rows;
+    std::vector<double> sfull(k, 0.0);
+    for (std::size_t s = 0; s < nu; ++s) {
+        for (std::size_t i = 0; i < n; ++i) {
+            const double d = diag[i];
+            if (d == 0.0) continue;
+            for (std::size_t c = 0; c < k; ++c) sfull[c] = 0.0;
+            const int rs = A.row_ptr[i];
+            const int re = A.row_ptr[i + 1];
+            for (int p = rs; p < re; ++p) {
+                const double aij = A.values[p];
+                const std::size_t j = static_cast<std::size_t>(A.col_idx[p]);
+                for (std::size_t c = 0; c < k; ++c) sfull[c] += aij * X[j * k + c];
+            }
+            const double inv_d = 1.0 / d;
+            for (std::size_t c = 0; c < k; ++c) {
+                const double s_off = sfull[c] - d * X[i * k + c];
+                X[i * k + c] = (B[i * k + c] - s_off) * inv_d;
+            }
+        }
+        for (std::size_t ii = 0; ii < n; ++ii) {
+            const std::size_t i = n - 1 - ii;
+            const double d = diag[i];
+            if (d == 0.0) continue;
+            for (std::size_t c = 0; c < k; ++c) sfull[c] = 0.0;
+            const int rs = A.row_ptr[i];
+            const int re = A.row_ptr[i + 1];
+            for (int p = rs; p < re; ++p) {
+                const double aij = A.values[p];
+                const std::size_t j = static_cast<std::size_t>(A.col_idx[p]);
+                for (std::size_t c = 0; c < k; ++c) sfull[c] += aij * X[j * k + c];
+            }
+            const double inv_d = 1.0 / d;
+            for (std::size_t c = 0; c < k; ++c) {
+                const double s_off = sfull[c] - d * X[i * k + c];
+                X[i * k + c] = (B[i * k + c] - s_off) * inv_d;
+            }
+        }
+    }
+}
+
+// Block prolong / restrict (multi-RHS).
+inline void prolong_block_into(const Prolongation &P,
+                                    const std::vector<double> &x_coarse,
+                                    std::size_t k,
+                                    std::vector<double> &y_fine) {
+    std::fill(y_fine.begin(), y_fine.end(), 0.0);
+    for (const auto &t : P.triples) {
+        const int fi = std::get<0>(t);
+        const int ci = std::get<1>(t);
+        const double w = std::get<2>(t);
+        for (std::size_t c = 0; c < k; ++c) {
+            y_fine[fi * k + c] += w * x_coarse[ci * k + c];
+        }
+    }
+}
+
+inline void restrict_pt_block_into(const Prolongation &P,
+                                        const std::vector<double> &x_fine,
+                                        std::size_t k,
+                                        std::vector<double> &y_coarse) {
+    std::fill(y_coarse.begin(), y_coarse.end(), 0.0);
+    for (const auto &t : P.triples) {
+        const int fi = std::get<0>(t);
+        const int ci = std::get<1>(t);
+        const double w = std::get<2>(t);
+        for (std::size_t c = 0; c < k; ++c) {
+            y_coarse[ci * k + c] += w * x_fine[fi * k + c];
+        }
+    }
+}
+
+// Block V-cycle scratch: per-level n×k buffers.
+struct BlockVCycleScratch {
+    std::vector<std::vector<double>> X, AX, R, E, RC, EC;
+    std::size_t k = 0;
+};
+
+inline BlockVCycleScratch make_scratch_block(const Hierarchy &h, std::size_t k) {
+    BlockVCycleScratch s;
+    s.k = k;
+    const std::size_t L = h.graphs.size();
+    s.X.resize(L); s.AX.resize(L); s.R.resize(L); s.E.resize(L);
+    s.RC.resize(L); s.EC.resize(L);
+    for (std::size_t l = 0; l < L; ++l) {
+        const std::size_t n = h.graphs[l].num_verts;
+        s.X[l].resize(n * k);
+        s.AX[l].resize(n * k);
+        s.R[l].resize(n * k);
+        s.E[l].resize(n * k);
+        if (l + 1 < L) {
+            const std::size_t nc = h.graphs[l + 1].num_verts;
+            s.RC[l].resize(nc * k);
+            s.EC[l].resize(nc * k);
+        }
+    }
+    return s;
+}
+
+// Block V-cycle: solves M·X ≈ B for k right-hand sides
+// simultaneously. Memory-amortised across the k RHS — the matrix
+// data + sparse pattern is loaded once per level for all k columns.
+inline void v_cycle_apply_block_into(const Hierarchy &h,
+                                            const std::vector<double> &B,
+                                            std::vector<double> &X_out,
+                                            std::size_t k,
+                                            BlockVCycleScratch &s,
+                                            std::size_t level = 0,
+                                            std::size_t pre_smooth = 1,
+                                            std::size_t post_smooth = 1) {
+    const std::size_t L = h.graphs.size();
+    if (level + 1 == L) {
+        // Bottom: per-column CG (small system, cheap).
+        const std::size_t n = h.graphs[level].num_verts;
+        X_out.assign(n * k, 0.0);
+        std::vector<double> b_col(n), x_col;
+        for (std::size_t c = 0; c < k; ++c) {
+            for (std::size_t i = 0; i < n; ++i) b_col[i] = B[i * k + c];
+            x_col = sparse::cg(h.mats[level], b_col, 30, 1e-6);
+            for (std::size_t i = 0; i < n; ++i) X_out[i * k + c] = x_col[i];
+        }
+        return;
+    }
+    const sparse::SparseMatrixCSR &A = h.mats[level];
+    const std::vector<double> &diag = h.diags[level];
+    const std::size_t n = A.rows;
+    auto &X = s.X[level];
+    std::fill(X.begin(), X.end(), 0.0);
+    sym_gauss_seidel_smooth_block(A, diag, B, X, k, pre_smooth);
+    sparse::spmv_multi_into(A, X, k, s.AX[level]);
+    auto &R = s.R[level];
+    for (std::size_t i = 0; i < n * k; ++i) R[i] = B[i] - s.AX[level][i];
+    auto &RC = s.RC[level];
+    auto &EC = s.EC[level];
+    restrict_pt_block_into(h.prolongs[level], R, k, RC);
+    v_cycle_apply_block_into(h, RC, EC, k, s, level + 1, pre_smooth, post_smooth);
+    auto &E = s.E[level];
+    prolong_block_into(h.prolongs[level], EC, k, E);
+    for (std::size_t i = 0; i < n * k; ++i) X[i] += E[i];
+    sym_gauss_seidel_smooth_block(A, diag, B, X, k, post_smooth);
+    X_out = X;
+}
+
+// Block ICC-style PCG with V-cycle preconditioner. Each of k RHS
+// has its own per-column alpha/beta/rz_old. SpMV and preconditioner
+// apply are block (memory-amortised).
+inline std::vector<double> cg_hsc_block(
+        const sparse::SparseMatrixCSR &A,
+        const Hierarchy &h,
+        const std::vector<double> &B,    // n × k
+        std::size_t k,
+        std::size_t max_iter,
+        double tol,
+        BlockVCycleScratch &s,
+        std::vector<std::size_t> *iters_out = nullptr) {
+    const std::size_t n = A.rows;
+    std::vector<double> X(n * k, 0.0);
+    std::vector<double> R = B;
+    std::vector<double> Z(n * k);
+    v_cycle_apply_block_into(h, R, Z, k, s);
+    std::vector<double> P = Z;
+    std::vector<double> rz_old(k, 0.0);
+    for (std::size_t i = 0; i < n; ++i) {
+        for (std::size_t c = 0; c < k; ++c) rz_old[c] += R[i * k + c] * Z[i * k + c];
+    }
+    const double tol_sq = tol * tol;
+    std::vector<char> done(k, 0);
+    std::size_t live = k;
+    std::vector<double> Ap(n * k);
+    std::vector<std::size_t> iters(k, 0);
+    for (std::size_t iter = 0; iter < max_iter; ++iter) {
+        sparse::spmv_multi_into(A, P, k, Ap);
+        std::vector<double> pAp(k, 0.0);
+        for (std::size_t i = 0; i < n; ++i) {
+            for (std::size_t c = 0; c < k; ++c) pAp[c] += P[i * k + c] * Ap[i * k + c];
+        }
+        std::vector<double> alpha(k, 0.0);
+        for (std::size_t c = 0; c < k; ++c) {
+            alpha[c] = (pAp[c] == 0.0) ? 0.0 : (rz_old[c] / pAp[c]);
+        }
+        for (std::size_t i = 0; i < n; ++i) {
+            for (std::size_t c = 0; c < k; ++c) {
+                X[i * k + c] += alpha[c] * P[i * k + c];
+                R[i * k + c] -= alpha[c] * Ap[i * k + c];
+            }
+        }
+        std::vector<double> rr(k, 0.0);
+        for (std::size_t i = 0; i < n; ++i) {
+            for (std::size_t c = 0; c < k; ++c) rr[c] += R[i * k + c] * R[i * k + c];
+        }
+        for (std::size_t c = 0; c < k; ++c) {
+            if (!done[c]) iters[c] = iter + 1;
+            if (!done[c] && rr[c] < tol_sq) { done[c] = 1; --live; }
+        }
+        if (live == 0) break;
+        v_cycle_apply_block_into(h, R, Z, k, s);
+        std::vector<double> rz_new(k, 0.0);
+        for (std::size_t i = 0; i < n; ++i) {
+            for (std::size_t c = 0; c < k; ++c) rz_new[c] += R[i * k + c] * Z[i * k + c];
+        }
+        std::vector<double> beta(k, 0.0);
+        for (std::size_t c = 0; c < k; ++c) {
+            beta[c] = (rz_old[c] == 0.0) ? 0.0 : (rz_new[c] / rz_old[c]);
+        }
+        for (std::size_t i = 0; i < n; ++i) {
+            for (std::size_t c = 0; c < k; ++c) {
+                P[i * k + c] = Z[i * k + c] + beta[c] * P[i * k + c];
+            }
+        }
+        rz_old = rz_new;
+    }
+    if (iters_out) *iters_out = iters;
+    return X;
+}
+
 // PCG variant that reuses a caller-supplied VCycleScratch. Each
 // thread in a shared-nothing 12-RHS solve creates its own
 // scratch once and reuses it across V-cycle applies, saving the

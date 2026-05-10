@@ -210,6 +210,18 @@ bin/diag_hsc_profile_5k: diag_hsc_profile_5k.cpp mire_body_data.h | bin
 diag_hsc_profile_5k: bin/diag_hsc_profile_5k
 	@bin/diag_hsc_profile_5k
 
+bin/diag_hsc_max_degree_sweep: diag_hsc_max_degree_sweep.cpp mire_body_data.h | bin
+	$(CXX) $(BENCH_CXXFLAGS) -o $@ $<
+
+diag_hsc_max_degree_sweep: bin/diag_hsc_max_degree_sweep
+	@bin/diag_hsc_max_degree_sweep
+
+bin/bench_hsc_block_5k: bench_hsc_block_5k.cpp mire_body_data.h | bin
+	$(CXX) $(BENCH_CXXFLAGS) -lpthread -o $@ $<
+
+bench_hsc_block_5k: bin/bench_hsc_block_5k
+	@bin/bench_hsc_block_5k
+
 bin/bench_deform_70k_icc: bench_deform_70k_icc.cpp mire_body_70k_data.h | bin
 	$(CXX) $(BENCH_CXXFLAGS) -o $@ $<
 

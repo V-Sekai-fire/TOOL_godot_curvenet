@@ -60,6 +60,26 @@ inline void spmv_into(const SparseMatrixCSR &A,
     }
 }
 
+// In-place multi-RHS SpMV: Y is pre-allocated to A.rows × k, cleared
+// in place. Used by block V-cycle to avoid per-iter allocation.
+inline void spmv_multi_into(const SparseMatrixCSR &A,
+                                  const std::vector<double> &X,
+                                  std::size_t k,
+                                  std::vector<double> &Y) {
+    std::fill(Y.begin(), Y.end(), 0.0);
+    for (std::size_t i = 0; i < A.rows; ++i) {
+        const int rs = A.row_ptr[i];
+        const int re = A.row_ptr[i + 1];
+        for (int p = rs; p < re; ++p) {
+            const double aij = A.values[p];
+            const std::size_t j = static_cast<std::size_t>(A.col_idx[p]);
+            for (std::size_t c = 0; c < k; ++c) {
+                Y[i * k + c] += aij * X[j * k + c];
+            }
+        }
+    }
+}
+
 // Multi-RHS sparse mat-vec: Y[i, c] = Σ A[i, j] · X[j, c] for k columns.
 // Out is rows × k row-major. O(nnz(A) · k).
 inline std::vector<double> spmv_multi(const SparseMatrixCSR &A,
