@@ -79,3 +79,9 @@ jobs:
 
       - name: Real-input validators (slangc -target cpp + clang + run)
         run: make -C tests/slang_validate test
+
+      - name: Lean equivalence proofs (spec ≡ slangc-emitted kernel)
+        working-directory: lean
+        run: |
+          lake build axpy_validate
+          lake exe  axpy_validate
