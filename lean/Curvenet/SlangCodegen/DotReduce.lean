@@ -43,11 +43,11 @@ private def two_sum : SlangFunctionDecl :=
   , name    := "two_sum"
   , params  := [fIn "a", fIn "b", fOut "hi", fOut "lo"]
   , body    :=
-      [ .declPreciseInit floatTy "h" (.bin "+" (.var "a") (.var "b"))
-      , .declPreciseInit floatTy "bb" (.bin "-" (.var "h") (.var "a"))
-      , .declPreciseInit floatTy "ah" (.bin "-" (.var "h") (.var "bb"))
-      , .declPreciseInit floatTy "lo_a" (.bin "-" (.var "a") (.var "ah"))
-      , .declPreciseInit floatTy "lo_b" (.bin "-" (.var "b") (.var "bb"))
+      [ .declInit          floatTy "h" (.bin "+" (.var "a") (.var "b"))
+      , .declInit          floatTy "bb" (.bin "-" (.var "h") (.var "a"))
+      , .declInit          floatTy "ah" (.bin "-" (.var "h") (.var "bb"))
+      , .declInit          floatTy "lo_a" (.bin "-" (.var "a") (.var "ah"))
+      , .declInit          floatTy "lo_b" (.bin "-" (.var "b") (.var "bb"))
       , .assign (.var "hi") (.var "h")
       , .assign (.var "lo") (.bin "+" (.var "lo_a") (.var "lo_b"))
       , .ret none ] }
@@ -58,8 +58,8 @@ private def quick_two_sum : SlangFunctionDecl :=
   , name    := "quick_two_sum"
   , params  := [fIn "a", fIn "b", fOut "hi", fOut "lo"]
   , body    :=
-      [ .declPreciseInit floatTy "h" (.bin "+" (.var "a") (.var "b"))
-      , .declPreciseInit floatTy "t" (.bin "-" (.var "h") (.var "a"))
+      [ .declInit          floatTy "h" (.bin "+" (.var "a") (.var "b"))
+      , .declInit          floatTy "t" (.bin "-" (.var "h") (.var "a"))
       , .assign (.var "hi") (.var "h")
       , .assign (.var "lo") (.bin "-" (.var "b") (.var "t"))
       , .ret none ] }
@@ -70,7 +70,7 @@ private def two_prod : SlangFunctionDecl :=
   , name    := "two_prod"
   , params  := [fIn "a", fIn "b", fOut "hi", fOut "lo"]
   , body    :=
-      [ .declPreciseInit floatTy "h" (.bin "*" (.var "a") (.var "b"))
+      [ .declInit          floatTy "h" (.bin "*" (.var "a") (.var "b"))
       , .assign (.var "hi") (.var "h")
       , .assign (.var "lo")
           (.call "fma" [.var "a", .var "b", .un "-" (.var "h")])
@@ -88,9 +88,9 @@ private def df_add : SlangFunctionDecl :=
       , .declare floatTy "sl" none
       , .expr (.call "two_sum"
           [.var "x_hi", .var "y_hi", .var "sh", .var "sl"])
-      , .declPreciseInit floatTy "xy_lo"
+      , .declInit          floatTy "xy_lo"
           (.bin "+" (.var "x_lo") (.var "y_lo"))
-      , .declPreciseInit floatTy "sl2"
+      , .declInit          floatTy "sl2"
           (.bin "+" (.var "sl") (.var "xy_lo"))
       , .expr (.call "quick_two_sum"
           [.var "sh", .var "sl2", .var "z_hi", .var "z_lo"])
@@ -165,6 +165,8 @@ def shader : SlangShaderModule :=
       , ⟨"dst",    .rwBuf (.scalar .float),   Semantic.none, some 3, some 0, .qIn⟩ ]
   , functions := [two_sum, quick_two_sum, two_prod, df_add, mainEntry] }
 
+
+
 def expected : String :=
 "struct DotReduceParams {
   uint n;
@@ -183,26 +185,26 @@ StructuredBuffer<float> b;
 RWStructuredBuffer<float> dst;
 
 void two_sum(float a, float b, out float hi, out float lo) {
-  precise float h = (a + b);
-  precise float bb = (h - a);
-  precise float ah = (h - bb);
-  precise float lo_a = (a - ah);
-  precise float lo_b = (b - bb);
+  float h = (a + b);
+  float bb = (h - a);
+  float ah = (h - bb);
+  float lo_a = (a - ah);
+  float lo_b = (b - bb);
   hi = h;
   lo = (lo_a + lo_b);
   return;
 }
 
 void quick_two_sum(float a, float b, out float hi, out float lo) {
-  precise float h = (a + b);
-  precise float t = (h - a);
+  float h = (a + b);
+  float t = (h - a);
   hi = h;
   lo = (b - t);
   return;
 }
 
 void two_prod(float a, float b, out float hi, out float lo) {
-  precise float h = (a * b);
+  float h = (a * b);
   hi = h;
   lo = fma(a, b, (-h));
   return;
@@ -212,8 +214,8 @@ void df_add(float x_hi, float x_lo, float y_hi, float y_lo, out float z_hi, out 
   float sh;
   float sl;
   two_sum(x_hi, y_hi, sh, sl);
-  precise float xy_lo = (x_lo + y_lo);
-  precise float sl2 = (sl + xy_lo);
+  float xy_lo = (x_lo + y_lo);
+  float sl2 = (sl + xy_lo);
   quick_two_sum(sh, sl2, z_hi, z_lo);
   return;
 }
