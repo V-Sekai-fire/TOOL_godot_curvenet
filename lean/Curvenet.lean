@@ -37,4 +37,5 @@ import Curvenet.HierarchicalSparsifyCompensate
 import Curvenet.GraphColoring
 import Curvenet.DirectDeltaMush
 import Curvenet.DirectDeltaMushBind
+import Curvenet.SlangCodegen
 import Curvenet.Features

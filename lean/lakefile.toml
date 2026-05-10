@@ -1,6 +1,11 @@
 name = "Curvenet"
 defaultTargets = ["Curvenet", "LeanGltf"]
 
+[[require]]
+name = "LeanSlang"
+git = "https://github.com/V-Sekai-fire/lean-slang.git"
+rev = "v0.0.1"
+
 [[lean_lib]]
 name = "Curvenet"
 
