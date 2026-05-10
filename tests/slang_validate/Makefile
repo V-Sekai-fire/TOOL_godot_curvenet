@@ -16,7 +16,10 @@ EMITTED    := $(CURDIR)/build
 LEAN_DIR   := $(REPO_ROOT)/lean
 
 CXX        ?= clang++
-CXXFLAGS   ?= -std=c++17 -O2 -Wall -Wextra
+# -Wno-unused-parameter silences clang's complaint about
+# `entryPointParams_0` in slangc -target cpp output (the parameter is
+# part of the Slang ABI and unused by every compute kernel we emit).
+CXXFLAGS   ?= -std=c++17 -O2 -Wall -Wextra -Wno-unused-parameter
 INCLUDES   := -I$(SLANG_DIR)/include -I$(EMITTED)
 
 KERNELS    := axpy saxpby jacobi
