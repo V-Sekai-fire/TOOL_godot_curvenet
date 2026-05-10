@@ -7,8 +7,7 @@ tangent) and `w` (cross-section width along binormal). Today only `w`
 has a 3D drag handle (commit `9a8ee1f`); `l` is auto-derived from
 segment length. Artists can't independently stretch/compress a knot's
 length influence — it's coupled to the segment's Euclidean length.
-Medium-priority gap in
-[`docs/FEATURES.md`](../docs/FEATURES.md#medium-priority).
+Medium-priority gap.
 
 ## Gall-minimum slice
 

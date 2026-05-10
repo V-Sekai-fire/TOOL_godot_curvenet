@@ -3,7 +3,7 @@
 ## What we don't know
 
 The Sharp & Crane 2020 mollified Laplacian
-([05 cot-Laplacian](../known/05_cot_laplacian.md)) handles thin
+([05 cot-Laplacian](../known_knowns/05_cot_laplacian.md)) handles thin
 triangles. We don't know what happens for:
 
 - Truly zero-length edges (duplicate vertices)

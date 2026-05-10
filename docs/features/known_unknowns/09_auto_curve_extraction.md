@@ -6,8 +6,7 @@ Profile curves are 100% artist-authored. Demo workflows on
 non-character meshes (test rigs, captured scans, asset library) need
 to bootstrap curves automatically — no artist time. Without auto
 extraction, every demo is bottlenecked on someone hand-placing
-curves. Low/research priority gap in
-[`docs/FEATURES.md`](../docs/FEATURES.md#low-priority--research).
+curves. Low/research priority gap.
 
 ## Gall-minimum slice
 

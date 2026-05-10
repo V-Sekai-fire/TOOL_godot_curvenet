@@ -7,8 +7,7 @@ and `−` sides per outgoing segment, and `cut_mesh::CutVertexKind`
 already carries a `side` boolean — but no editor surface. The
 deformer always pulls from the right side at intersection knots,
 making asymmetric character articulation (e.g., armpit pull only
-deforms one side) impossible. Medium-priority gap in
-[`docs/FEATURES.md`](../docs/FEATURES.md#medium-priority).
+deforms one side) impossible. Medium-priority gap.
 
 ## Gall-minimum slice
 

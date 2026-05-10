@@ -13,8 +13,7 @@ aligns with world Y", *not* "the rest frame matches the surface".
 Result: an artist setting tilt = 0 expects the frame to lie flat on
 the surface; instead it's tied to global axes. Tilting a knot on a
 curved torso doesn't behave like tilting a bone — it behaves like
-tilting against the world. Medium-priority gap in
-[`docs/FEATURES.md`](../docs/FEATURES.md#medium-priority).
+tilting against the world. Medium-priority gap.
 
 ## Gall-minimum slice
 

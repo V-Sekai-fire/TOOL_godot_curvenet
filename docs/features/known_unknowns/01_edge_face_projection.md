@@ -6,8 +6,7 @@
 curvenet knot snaps to its closest mesh vertex. On coarse meshes this
 produces visible "stair-step" curves: the artist drags a smooth
 Bézier, but the deformer sees a polyline that jumps between widely
-spaced vertices. Listed as the #1 high-priority gap in
-[`docs/FEATURES.md`](../docs/FEATURES.md#high-priority).
+spaced vertices. Listed as the #1 high-priority gap.
 
 ## Gall-minimum slice
 

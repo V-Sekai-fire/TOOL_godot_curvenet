@@ -94,5 +94,5 @@ not supporting it is a real authoring-pipeline gap.
 - Risk: low. `CSGShape3D::bake_static_mesh` is stable Godot 4.x API;
   the resulting mesh is just an `ArrayMesh` with the same surface
   arrays the deformer already consumes. Non-manifold tolerance is
-  inherited from [05 cot-Laplacian](../known/05_cot_laplacian.md)'s
+  inherited from [05 cot-Laplacian](../known_knowns/05_cot_laplacian.md)'s
   Sharp-Crane mollification.

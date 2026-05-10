@@ -5,8 +5,7 @@
 Authoring is real-time-only — once an artist drags knots, the result
 is the new pose, not a recording. There's no way to keyframe knot
 positions / tilts / widths over time and replay them as an animation
-track. Low/research priority gap in
-[`docs/FEATURES.md`](../docs/FEATURES.md#low-priority--research).
+track. Low/research priority gap.
 
 ## Gall-minimum slice
 

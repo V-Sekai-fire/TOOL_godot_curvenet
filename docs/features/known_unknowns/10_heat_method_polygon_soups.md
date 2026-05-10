@@ -8,8 +8,7 @@ non-manifold / broken meshes that production pipelines actually
 produce. Crane 2013's heat method gives this in three CG solves; the
 Sharp & Crane 2020 mollified Laplacian (already in the codebase as
 `RobustLaplacian`) makes it work on polygon soups.
-Low/research priority gap in
-[`docs/FEATURES.md`](../docs/FEATURES.md#low-priority--research).
+Low/research priority gap.
 
 ## Gall-minimum slice
 

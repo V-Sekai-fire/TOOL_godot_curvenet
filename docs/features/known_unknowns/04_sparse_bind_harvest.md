@@ -6,9 +6,8 @@ DDM bind harvest at `src/curvenet_deformer_3d.cpp` calls the **dense**
 `harmonic_solve::solve_multi`, which builds the full nv×nv `lhs` and
 runs `dense::solve_multi`. On the 81 k Mire body that's ~30 s — too
 slow for interactive iteration when the artist re-binds (every
-topology change, every DDM toggle flip). #4 high-priority gap in
-[`docs/FEATURES.md`](../docs/FEATURES.md#high-priority); see
-[`docs/PERF_BASELINE.md`](../docs/PERF_BASELINE.md) for the dense
+topology change, every DDM toggle flip); see
+[`PERF_BASELINE.md`](../../PERF_BASELINE.md) for the dense
 solve cost.
 
 ## Gall-minimum slice

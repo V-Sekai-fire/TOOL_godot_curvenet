@@ -13,8 +13,8 @@ for DeGoes22 §4.1 cut-mesh construction.
 shipping default for the sample-promotion path. The surgery
 primitives (`subdivide_edge`, `split_face`, `insert_crack_at_endpoint`)
 are specced and proved but not yet invoked by the bind step — see
-[todo 01](../../todo/01_edge_face_projection.md) and
-[todo 02](../../todo/02_curve_segment_tracing.md).
+[known unknowns 01](../known_unknowns/01_edge_face_projection.md) and
+[known unknowns 02](../known_unknowns/02_curve_segment_tracing.md).
 
 ## Files
 
@@ -64,5 +64,5 @@ Programmer-facing:
   decides which vertices to promote)
 - Feeds [05 cot-Laplacian](05_cot_laplacian.md)'s face-loop
   traversal
-- Surgery primitives unlock [todo 01](../../todo/01_edge_face_projection.md)
-  and [todo 02](../../todo/02_curve_segment_tracing.md)
+- Surgery primitives unlock [known unknowns 01](../known_unknowns/01_edge_face_projection.md)
+  and [known unknowns 02](../known_unknowns/02_curve_segment_tracing.md)

@@ -7,8 +7,7 @@ vertex × 90 Hz, the matvec doesn't fit in Quest 3's CPU budget — but
 its memory-bandwidth footprint (~1.6 MB read traffic per frame) is
 well inside the GPU's envelope. Without GPU dispatch the project
 can't ship to Quest 3, which is the entire reason DDM was chosen over
-the §6 path. #3 high-priority gap in
-[`docs/FEATURES.md`](../docs/FEATURES.md#high-priority).
+the §6 path. #3 high-priority gap.
 
 ## Gall-minimum slice
 

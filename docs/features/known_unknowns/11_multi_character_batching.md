@@ -7,8 +7,7 @@ sparse matrices, ICC factors, DDM weight rows. A scene with 50
 characters duplicates these structures 50 times in CPU and GPU
 memory. Pipelines targeting crowd shots or many-NPC games would hit
 memory and bandwidth ceilings even though most characters share rest
-geometry. Low/research priority gap in
-[`docs/FEATURES.md`](../docs/FEATURES.md#low-priority--research).
+geometry. Low/research priority gap.
 
 ## Gall-minimum slice
 

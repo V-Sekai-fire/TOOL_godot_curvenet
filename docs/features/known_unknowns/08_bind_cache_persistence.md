@@ -5,8 +5,7 @@
 `RestCache` is rebuilt on every Godot session's first
 `apply_deformation`. On 81 k Mire body that's ~30 s of latency the
 artist eats every time they reopen the scene — even when nothing has
-changed since save. Medium-priority gap in
-[`docs/FEATURES.md`](../docs/FEATURES.md#medium-priority).
+changed since save. Medium-priority gap.
 
 ## Gall-minimum slice
 

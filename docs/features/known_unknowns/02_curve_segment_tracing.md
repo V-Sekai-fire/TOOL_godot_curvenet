@@ -7,8 +7,7 @@ vertices. The curve segments *between* knots aren't represented in
 the mesh — the cut-mesh has discrete Dirichlet boundary points, not
 the connected cracks DeGoes22 §4.1 assumes. Result: deformation
 "leaks" across the curve at runtime instead of pulling either side
-independently. #2 high-priority gap in
-[`docs/FEATURES.md`](../docs/FEATURES.md#high-priority).
+independently. #2 high-priority gap.
 
 ## Gall-minimum slice
 

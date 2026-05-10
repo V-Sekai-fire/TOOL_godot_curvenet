@@ -12,7 +12,7 @@ records the mapping back to the input (curve_id, knot_idx) tuple.
 shipping default — this is how curves get attached to the surface
 today. **Vertex-only**; edge and face projection kinds are reserved
 in the type but not yet emitted by the producer (see
-[todo 01](../../todo/01_edge_face_projection.md)).
+[known unknowns 01](../known_unknowns/01_edge_face_projection.md)).
 
 ## Files
 
@@ -52,5 +52,5 @@ Programmer-facing:
 - Consumes [02 curvenet graph](02_curvenet_graph.md)
 - Modifies [03 cut-mesh](03_cut_mesh.md)
 - Stair-steps on coarse meshes — see
-  [todo 01](../../todo/01_edge_face_projection.md) for edge+face
+  [known unknowns 01](../known_unknowns/01_edge_face_projection.md) for edge+face
   generalization
