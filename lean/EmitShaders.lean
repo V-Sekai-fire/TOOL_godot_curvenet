@@ -30,6 +30,13 @@ private def kernels : List (String × SlangShaderModule) :=
   , ("dot_reduce",        DotReduce.shader)
   , ("dot_reduce_multi",  DotReduceMulti.shader)
   , ("sgs_color",         SgsColor.shader)
+  , ("polygon_laplacian", PolygonLaplacian.shader)
+  , ("robust_laplacian",  RobustLaplacian.shader)
+  , ("scaled_frames",     ScaledFrames.shader)
+  , ("segment_gradient",  SegmentGradient.shader)
+  , ("intersection_frames", IntersectionFrames.shader)
+  , ("curve_interp",      CurveInterp.shader)
+  , ("vec3",              Vec3.shader)
   ]
 
 def main (args : List String) : IO UInt32 := do

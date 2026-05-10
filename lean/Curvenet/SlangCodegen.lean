@@ -10,6 +10,13 @@ import Curvenet.SlangCodegen.SpmvMulti
 import Curvenet.SlangCodegen.DotReduce
 import Curvenet.SlangCodegen.DotReduceMulti
 import Curvenet.SlangCodegen.SgsColor
+import Curvenet.SlangCodegen.PolygonLaplacian
+import Curvenet.SlangCodegen.RobustLaplacian
+import Curvenet.SlangCodegen.ScaledFrames
+import Curvenet.SlangCodegen.SegmentGradient
+import Curvenet.SlangCodegen.IntersectionFrames
+import Curvenet.SlangCodegen.CurveInterp
+import Curvenet.SlangCodegen.Vec3
 
 /-!
 # `Curvenet.SlangCodegen` — Slang shader codegen umbrella
