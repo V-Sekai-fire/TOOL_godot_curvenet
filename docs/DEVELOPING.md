@@ -19,8 +19,9 @@ The Lake `extern_lib axpy_native` compiles the slangc-cpp output of
 `axpy.slang` plus a C-ABI shim into a static library;
 `Curvenet.SlangValidate.Axpy` declares the C entry point as a Lean
 `@[extern]`, and `lake exe axpy_validate` runs three fixtures
-comparing the kernel output to a pure-Lean `axpySpec`. The pattern
-is mechanical to extend to other kernels.
+comparing the kernel output to a pure-Lean `axpySpec`. Other
+kernels follow the same shape (~50 LOC of C shim + ~30 LOC of
+Lean harness per kernel).
 
 The standalone C++ test harness under `tests/slang_validate/` runs
 the same end-to-end check (slangc-cpp → clang → run on hand-rolled
@@ -56,58 +57,59 @@ cd lean && lake exe axpy_validate     # spec ≡ slangc-emitted-kernel
                                       # fixtures via the FFI bridge
 ```
 
-The Lean side is self-contained — no C++ build needed for `lake build`
-to succeed. Slangc validation requires `bin/.slang/`. Real-input + FFI
-equivalence additionally need a host C++ compiler.
+`lake build` is self-contained: no C++ toolchain required. Slangc
+validation requires `bin/.slang/`. Real-input + FFI equivalence
+additionally need a host C++ compiler.
 
 ## Validation pipeline
 
 Every Slang kernel is gated by four layers:
 
-| Layer | What it catches | Coverage |
-|---|---|---|
-| `native_decide` on emission text | LeanSlang pretty-printer drift | 32 / 32 |
-| `slangc -target spirv` round-trip | Slang syntactic / semantic errors, SPIR-V codegen failures | 32 / 32 |
-| `slangc -target metal` + `xcrun metal` + `xcrun metallib` | MSL-specific issues + AOT compile to Apple `.metallib` | 31 / 32 (skips `direct_delta_mush` — slangc Metal codegen bug; SPIR-V path is fine) |
-| `slangc -target cpp` + clang + run on known inputs | Wrong arg order, swapped binding, off-by-one, anything that compiles cleanly but computes the wrong thing | 3 / 32 (axpy, saxpby, jacobi; pattern is per-kernel ~50 LOC) |
+| Layer                                                     | What it catches                                                                                           | Coverage                                                                                  |
+| --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `native_decide` on emission text                          | LeanSlang pretty-printer drift                                                                            | 32 / 32                                                                                   |
+| `slangc -target spirv` round-trip                         | Slang syntactic / semantic errors, SPIR-V codegen failures                                                | 32 / 32                                                                                   |
+| `slangc -target metal` + `xcrun metal` + `xcrun metallib` | MSL-specific issues, AOT compile to Apple `.metallib`                                                     | 31 / 32 (skips `direct_delta_mush`; slangc has a Metal-codegen bug for it. SPIR-V works.) |
+| `slangc -target cpp` + clang + run on known inputs        | Wrong arg order, swapped binding, off-by-one, anything that compiles cleanly but computes the wrong thing | 3 / 32 (axpy, saxpby, jacobi; pattern is per-kernel ~50 LOC)                              |
 
 The Lean `extern_lib axpy_native` builds atop the cpp target: the
 slangc-emitted CPU function is wrapped by `lean/native/axpy_shim.cpp`
 into a Lean-callable extern, then `lake exe axpy_validate` runs three
 fixtures comparing the kernel output to a pure-Lean `axpySpec`. This
-is the cleanest "spec ≡ kernel" gate — extending it to other kernels
-is mechanical (~50 LOC of shim + ~30 LOC of harness per kernel).
+gate proves `spec = kernel` directly (rather than "the text matches"
+or "it compiles"). Adding a kernel takes ~50 LOC of C shim plus ~30
+LOC of Lean harness.
 
 ## Layer mapping
 
-| §  | Lean spec | Slang kernel |
-|----|-----------|--------------|
-| §3 curvenet | `Curvenet.{IntersectionFrames, CurveInterp, SegmentGradient, ScaledFrames, CurvenetBuilder}` | `Curvenet.SlangCodegen.{ScaledFrames, SegmentGradient, IntersectionFrames, CurveInterp, CurvenetBuilder}` |
-| §4.1 cut-mesh | `Curvenet.{Halfedge, HalfedgeBuilder, CutMesh, CutAlgorithm, SurfaceProjection}` | `Curvenet.SlangCodegen.{Halfedge, HalfedgeBuilder, CutMesh, CutAlgorithm, SurfaceProjection}` |
-| §4.2 discretisation | `Curvenet.{PolygonLaplacian, RobustLaplacian, CutMeshLaplacian}` | `Curvenet.SlangCodegen.{PolygonLaplacian, RobustLaplacian, CutMeshLaplacian}` |
-| solver kernels | `Curvenet.{DenseLinAlg, SparseLinAlg, IncompleteCholesky, HierarchicalSparsifyCompensate, GraphColoring}` | `Curvenet.SlangCodegen.{DenseLinAlg, SparseLinAlg, IncompleteCholesky, HierarchicalSparsify}` plus the BLAS / preconditioner kernels (`Axpy`, `AxpyMulti`, `Saxpby`, `SaxpbyMulti`, `Jacobi`, `JacobiMulti`, `Spmv`, `SpmvMulti`, `DotReduce`, `DotReduceMulti`, `SgsColor`) |
-| §4.3 solve | `Curvenet.{HarmonicSolve, DeformSolve}` | `Curvenet.SlangCodegen.{HarmonicSolve, DeformSolve}` |
-| runtime kernel | `Curvenet.{DirectDeltaMush, DirectDeltaMushBind}` | `Curvenet.SlangCodegen.DirectDeltaMush` |
-| shared helpers | — | `Curvenet.SlangCodegen.Common` (type aliases, mat3 storage, 3×3 inverse, cot weight, four Knuth/Dekker EFT primitives) |
+| §                   | Lean spec                                                                                                 | Slang kernel                                                                                                                                                                                                                                                                 |
+| ------------------- | --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| §3 curvenet         | `Curvenet.{IntersectionFrames, CurveInterp, SegmentGradient, ScaledFrames, CurvenetBuilder}`              | `Curvenet.SlangCodegen.{ScaledFrames, SegmentGradient, IntersectionFrames, CurveInterp, CurvenetBuilder}`                                                                                                                                                                    |
+| §4.1 cut-mesh       | `Curvenet.{Halfedge, HalfedgeBuilder, CutMesh, CutAlgorithm, SurfaceProjection}`                          | `Curvenet.SlangCodegen.{Halfedge, HalfedgeBuilder, CutMesh, CutAlgorithm, SurfaceProjection}`                                                                                                                                                                                |
+| §4.2 discretisation | `Curvenet.{PolygonLaplacian, RobustLaplacian, CutMeshLaplacian}`                                          | `Curvenet.SlangCodegen.{PolygonLaplacian, RobustLaplacian, CutMeshLaplacian}`                                                                                                                                                                                                |
+| solver kernels      | `Curvenet.{DenseLinAlg, SparseLinAlg, IncompleteCholesky, HierarchicalSparsifyCompensate, GraphColoring}` | `Curvenet.SlangCodegen.{DenseLinAlg, SparseLinAlg, IncompleteCholesky, HierarchicalSparsify}` plus the BLAS / preconditioner kernels (`Axpy`, `AxpyMulti`, `Saxpby`, `SaxpbyMulti`, `Jacobi`, `JacobiMulti`, `Spmv`, `SpmvMulti`, `DotReduce`, `DotReduceMulti`, `SgsColor`) |
+| §4.3 solve          | `Curvenet.{HarmonicSolve, DeformSolve}`                                                                   | `Curvenet.SlangCodegen.{HarmonicSolve, DeformSolve}`                                                                                                                                                                                                                         |
+| runtime kernel      | `Curvenet.{DirectDeltaMush, DirectDeltaMushBind}`                                                         | `Curvenet.SlangCodegen.DirectDeltaMush`                                                                                                                                                                                                                                      |
+| shared helpers      | (none)                                                                                                    | `Curvenet.SlangCodegen.Common` (type aliases, mat3 storage, 3×3 inverse, cot weight, four Knuth/Dekker EFT primitives)                                                                                                                                                       |
 
 ## Continuous integration
 
 [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs two
 jobs on every push and PR:
 
-- **`lean-and-slang`** on `ubuntu-latest` — `lake build` (every
+- **`lean-and-slang`** on `ubuntu-latest`: `lake build` (every
   `native_decide`), `slangc -target spirv` round-trip on all 32
   kernels (asserts SPIR-V magic `0x07230203` + size > 100 bytes),
   the slang_validate harness, and the `axpy_validate` equivalence
   check.
-- **`metal`** on `macos-14` — same as above plus the full Slang →
+- **`metal`** on `macos-14`: same as above plus the full Slang →
   `.metal` source → `xcrun metal` (.air) → `xcrun metallib` chain
-  (asserts `MTLB` magic). `macos-13` Intel runners are intentionally
-  avoided because they lack GPU paravirtualization.
+  (asserts `MTLB` magic). `macos-13` Intel runners lack GPU
+  paravirtualization, so this job stays pinned to Apple Silicon.
 
 The `main` branch is protected: every change goes through a PR with
-both checks green before it can land. `enforce_admins: true` —
-admins included, no bypass.
+both checks green before it can land. `enforce_admins: true`. Admins
+included, no bypass.
 
 ## Slang language reference
 
