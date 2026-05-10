@@ -49,6 +49,19 @@ void CurveNetDeformer3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "deformation_active"),
 			"set_deformation_active", "is_deformation_active");
 
+	ClassDB::bind_method(D_METHOD("set_use_direct_delta_mush", "v"), &CurveNetDeformer3D::set_use_direct_delta_mush);
+	ClassDB::bind_method(D_METHOD("get_use_direct_delta_mush"), &CurveNetDeformer3D::get_use_direct_delta_mush);
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "use_direct_delta_mush"),
+			"set_use_direct_delta_mush", "get_use_direct_delta_mush");
+	ClassDB::bind_method(D_METHOD("set_ddm_top_k", "v"), &CurveNetDeformer3D::set_ddm_top_k);
+	ClassDB::bind_method(D_METHOD("get_ddm_top_k"), &CurveNetDeformer3D::get_ddm_top_k);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "ddm_top_k", PROPERTY_HINT_RANGE, "1,32,1"),
+			"set_ddm_top_k", "get_ddm_top_k");
+	ClassDB::bind_method(D_METHOD("set_ddm_smooth_iters", "v"), &CurveNetDeformer3D::set_ddm_smooth_iters);
+	ClassDB::bind_method(D_METHOD("get_ddm_smooth_iters"), &CurveNetDeformer3D::get_ddm_smooth_iters);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "ddm_smooth_iters", PROPERTY_HINT_RANGE, "0,32,1"),
+			"set_ddm_smooth_iters", "get_ddm_smooth_iters");
+
 	ClassDB::bind_method(D_METHOD("apply_deformation"), &CurveNetDeformer3D::apply_deformation);
 	ClassDB::bind_method(D_METHOD("get_face_count"), &CurveNetDeformer3D::get_face_count);
 	ClassDB::bind_method(D_METHOD("get_face_vertex_count", "face_index"), &CurveNetDeformer3D::get_face_vertex_count);
@@ -71,6 +84,8 @@ void CurveNetDeformer3D::invalidate_cache() {
 	rest_cache.prev_solve_valid = false;
 	rest_cache.nc = 0;
 	rest_cache.source_hash = 0;
+	rest_cache.ddm_influences.clear();
+	rest_cache.ddm_built = false;
 }
 
 void CurveNetDeformer3D::set_source_path(const NodePath &p_path) {
@@ -121,6 +136,47 @@ void CurveNetDeformer3D::set_use_incomplete_cholesky(bool p_v) {
 
 bool CurveNetDeformer3D::get_use_incomplete_cholesky() const {
 	return use_incomplete_cholesky;
+}
+
+void CurveNetDeformer3D::set_use_direct_delta_mush(bool p_v) {
+	if (use_direct_delta_mush != p_v) {
+		// Toggle changes which bind-time work the cache holds; force a
+		// rebuild on next `apply_deformation` so we don't carry stale
+		// influences (or lack thereof) into the new mode.
+		rest_cache.ddm_influences.clear();
+		rest_cache.ddm_built = false;
+	}
+	use_direct_delta_mush = p_v;
+}
+
+bool CurveNetDeformer3D::get_use_direct_delta_mush() const {
+	return use_direct_delta_mush;
+}
+
+void CurveNetDeformer3D::set_ddm_top_k(int p_v) {
+	if (p_v < 1) p_v = 1;
+	if (ddm_top_k != p_v) {
+		rest_cache.ddm_influences.clear();
+		rest_cache.ddm_built = false;
+	}
+	ddm_top_k = p_v;
+}
+
+int CurveNetDeformer3D::get_ddm_top_k() const {
+	return ddm_top_k;
+}
+
+void CurveNetDeformer3D::set_ddm_smooth_iters(int p_v) {
+	if (p_v < 0) p_v = 0;
+	if (ddm_smooth_iters != p_v) {
+		rest_cache.ddm_influences.clear();
+		rest_cache.ddm_built = false;
+	}
+	ddm_smooth_iters = p_v;
+}
+
+int CurveNetDeformer3D::get_ddm_smooth_iters() const {
+	return ddm_smooth_iters;
 }
 
 void CurveNetDeformer3D::_ready() {
@@ -274,6 +330,67 @@ void CurveNetDeformer3D::apply_deformation() {
 	const std::size_t nh = rest_cache.cut_mesh.he_count();
 	const int nc = rest_cache.nc;
 
+	// Bind-time DDM harvest: scalar harmonic solve per handle gives the
+	// per-vertex weight matrix W. Smooth (Laplacian iters) + sparsify
+	// (top-K) prepares the runtime LBS-style matvec. Runs once per
+	// topology change OR DDM toggle flip — `set_use_direct_delta_mush`
+	// invalidates `ddm_built` so we re-harvest on next apply.
+	if (use_direct_delta_mush && rest_cache.valid && !rest_cache.ddm_built && nc > 0) {
+		const std::size_t ncs = static_cast<std::size_t>(nc);
+		// Identity Fc: each handle column is one-hot in its own row.
+		std::vector<double> Fc_id(ncs * ncs, 0.0);
+		for (std::size_t i = 0; i < ncs; ++i) {
+			Fc_id[i * ncs + i] = 1.0;
+		}
+		const auto sample_col_pack = [](int curve_id, int /*sample_idx*/, bool /*side*/) -> int {
+			return curve_id;
+		};
+		// solve_multi → nv × nc row-major; column h is handle h's harmonic response.
+		const std::vector<double> W_dense =
+			curvenet::harmonic_solve::solve_multi(
+				rest_cache.cut_mesh, rest_cache.positions, sample_col_pack, Fc_id, ncs);
+		curvenet::direct_delta_mush::WeightMatrix W(nv,
+			std::vector<double>(ncs, 0.0));
+		for (std::size_t v = 0; v < nv; ++v) {
+			for (std::size_t h = 0; h < ncs; ++h) {
+				W[v][h] = W_dense[v * ncs + h];
+			}
+		}
+		// Sample-promoted vertices have zero-row from the §6 solve (their
+		// V column is empty); override to one-hot so they follow their
+		// handle exactly at runtime.
+		for (std::size_t v = 0; v < nv; ++v) {
+			const auto &k = rest_cache.cut_mesh.vertex_kind[v];
+			if (k.tag == curvenet::cut_mesh::CutVertexKindTag::sample) {
+				const int col = k.curve_id;
+				for (auto &x : W[v]) x = 0.0;
+				if (col >= 0 && static_cast<std::size_t>(col) < ncs) {
+					W[v][col] = 1.0;
+				}
+			}
+		}
+		// Vertex-vertex adjacency from the triangle index list.
+		curvenet::direct_delta_mush::Adjacency adj(nv);
+		auto add_edge = [&](int a, int b) {
+			if (a < 0 || b < 0) return;
+			for (int x : adj[a]) if (x == b) return;
+			adj[a].push_back(b);
+		};
+		for (std::size_t f = 0; f + 2 < rest_cache.tri_indices.size(); f += 3) {
+			const int a = rest_cache.tri_indices[f + 0];
+			const int b = rest_cache.tri_indices[f + 1];
+			const int c = rest_cache.tri_indices[f + 2];
+			add_edge(a, b); add_edge(b, a);
+			add_edge(b, c); add_edge(c, b);
+			add_edge(c, a); add_edge(a, c);
+		}
+		const auto Wsmoothed = curvenet::direct_delta_mush::smooth_weights(
+			W, adj, static_cast<std::size_t>(ddm_smooth_iters), 0.5);
+		rest_cache.ddm_influences = curvenet::direct_delta_mush::sparsify_top_k(
+			Wsmoothed, static_cast<std::size_t>(ddm_top_k));
+		rest_cache.ddm_built = true;
+	}
+
 	// Helper that emits the deformed PackedVector3Array as an ArrayMesh
 	// directly (bypasses SurfaceTool::generate_normals's vertex splits,
 	// preserves the source mesh's vertex count). Normals are computed
@@ -364,6 +481,36 @@ void CurveNetDeformer3D::apply_deformation() {
 	const auto sample_col = [](int curve_id, int /*sample_idx*/, bool /*side*/) -> int {
 		return curve_id;
 	};
+
+	// DDM runtime branch: skip the §6 solve, do a sparse LBS matvec per vertex
+	// using the bind-time-harvested weights. Translation-only handle transforms
+	// for the v0 minimum (per-handle T_h = translation from rest to current).
+	if (use_direct_delta_mush && rest_cache.ddm_built) {
+		std::vector<curvenet::direct_delta_mush::Mat4> transforms;
+		transforms.reserve(static_cast<std::size_t>(nc));
+		for (int c = 0; c < nc; ++c) {
+			const auto &rest_p = rest_cache.col_rest_pos[c];
+			const double tx = Xc[c * 3 + 0] - rest_p.x;
+			const double ty = Xc[c * 3 + 1] - rest_p.y;
+			const double tz = Xc[c * 3 + 2] - rest_p.z;
+			transforms.push_back(
+				curvenet::direct_delta_mush::mat4_translation(tx, ty, tz));
+		}
+		PackedVector3Array deformed_vertices;
+		deformed_vertices.resize(static_cast<int>(nv));
+		for (std::size_t v = 0; v < nv; ++v) {
+			const auto &rest_p = rest_cache.positions[v];
+			const auto &infl = rest_cache.ddm_influences[v];
+			const auto p = curvenet::direct_delta_mush::lbs_matvec(
+				transforms, infl, rest_p.x, rest_p.y, rest_p.z);
+			deformed_vertices.set(static_cast<int>(v),
+				Vector3(static_cast<float>(p[0]),
+				         static_cast<float>(p[1]),
+				         static_cast<float>(p[2])));
+		}
+		emit_mesh(deformed_vertices);
+		return;
+	}
 
 	// Helper that applies Vᵀ implicitly: scatter per-halfedge values
 	// onto the target mesh-vertex (skip sample-promoted halfedges).

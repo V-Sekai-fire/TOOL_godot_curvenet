@@ -5,6 +5,7 @@
 
 #include "curvenet/cut_mesh.h"
 #include "curvenet/dense_linalg.h"
+#include "curvenet/direct_delta_mush.h"
 #include "curvenet/halfedge.h"
 #include "curvenet/incomplete_cholesky.h"
 #include "curvenet/sparse_linalg.h"
@@ -46,6 +47,16 @@ class CurveNetDeformer3D : public MeshInstance3D {
 	// synthetic 81k diag.
 	bool use_incomplete_cholesky = false;
 
+	// Direct Delta Mush opt-in (Le & Lewis 2019, curvenet-adapted).
+	// Off by default. When true, bind-time harvests per-handle harmonic
+	// response weights once and the per-frame path becomes a sparse
+	// LBS-style matvec (no §6 solves at runtime). Required for the
+	// Quest 3 0.8 ms / 50k-vert budget; on desktop the §6 path with
+	// warm-started PCG is competitive and remains the default.
+	bool use_direct_delta_mush = false;
+	int  ddm_top_k        = 4;
+	int  ddm_smooth_iters = 3;
+
 	// Cache of the rest-pose pipeline: halfedge mesh + sample-promoted
 	// CutMesh, plus the column ↔ input-handle mapping needed at runtime
 	// to pull per-frame sample positions from the user's Curve3D handles.
@@ -84,6 +95,12 @@ class CurveNetDeformer3D : public MeshInstance3D {
 		std::vector<double>                   prev_Fv;          // nv × 9
 		std::vector<double>                   prev_Xv;          // nv × 3
 		bool                                  prev_solve_valid = false;
+
+		// Direct Delta Mush per-vertex sparse influence list (set when
+		// `use_direct_delta_mush` was true at the last bind step).
+		// `ddm_influences[v]` is the sparse weight row for vertex v.
+		std::vector<std::vector<std::pair<int, double>>> ddm_influences;
+		bool                                  ddm_built = false;
 	};
 	mutable RestCache rest_cache;
 
@@ -109,6 +126,13 @@ public:
 
 	void set_use_incomplete_cholesky(bool p_v);
 	bool get_use_incomplete_cholesky() const;
+
+	void set_use_direct_delta_mush(bool p_v);
+	bool get_use_direct_delta_mush() const;
+	void set_ddm_top_k(int p_v);
+	int  get_ddm_top_k() const;
+	void set_ddm_smooth_iters(int p_v);
+	int  get_ddm_smooth_iters() const;
 
 	void _ready() override;
 
