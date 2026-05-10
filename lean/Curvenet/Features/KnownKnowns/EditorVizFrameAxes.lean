@@ -4,10 +4,10 @@ namespace Curvenet.Features.KnownKnowns
 
 open Curvenet
 
-/-- Feature 11 — Editor visualization (frame axes, width ring,
-    knot kind markers). The runtime frame derivation that the gizmo
-    mirrors is the same `isolatedSegmentGradient` proven for
-    rest = posed → identity. -/
+/-- Feature 11.4 — Editor viz: per-knot frame axes
+    (red tangent / green normal / blue binormal). The runtime frame
+    derivation that the gizmo mirrors is the same
+    `isolatedSegmentGradient` proven for rest = posed → identity. -/
 example :
     ScaledFrames.mat3WithinEps
       (ScaledFrames.isolatedSegmentGradient ⟨0,0,0⟩ ⟨1,0,0⟩ ⟨0,0,0⟩ ⟨1,0,0⟩)

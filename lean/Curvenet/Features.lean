@@ -4,7 +4,12 @@ import Curvenet.Features.KnownKnowns.CurvenetGraph
 import Curvenet.Features.KnownKnowns.CutMesh
 import Curvenet.Features.KnownKnowns.Degoes22Solve
 import Curvenet.Features.KnownKnowns.DirectDeltaMush
-import Curvenet.Features.KnownKnowns.EditorVisualization
+import Curvenet.Features.KnownKnowns.EditorVizFrameAxes
+import Curvenet.Features.KnownKnowns.EditorVizKnotKindMarkers
+import Curvenet.Features.KnownKnowns.EditorVizProjectionLinks
+import Curvenet.Features.KnownKnowns.EditorVizTangentControlLinks
+import Curvenet.Features.KnownKnowns.EditorVizTangentRays
+import Curvenet.Features.KnownKnowns.EditorVizWidthRing
 import Curvenet.Features.KnownKnowns.HalfedgeMesh
 import Curvenet.Features.KnownKnowns.ScaledFrames
 import Curvenet.Features.KnownKnowns.SolverKernels
