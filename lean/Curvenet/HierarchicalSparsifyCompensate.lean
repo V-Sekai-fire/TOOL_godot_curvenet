@@ -200,6 +200,34 @@ example :
     let g' := eliminateVertex triPlusLeaf 0
     fclose (edgeWeight g' 1 3) (4.0 / 6.0) 1e-12 = true := by native_decide
 
+-- Schur eliminate algebraic invariants.
+
+/-- Eliminating an isolated vertex (no incident edges) leaves the graph
+   edge-set unchanged. -/
+example :
+    let g : Graph := { numVerts := 3, edges := #[ (0, 1, 1.5) ] }
+    let g' := eliminateVertex g 2
+    g'.edges.size = 1 ∧ fclose (edgeWeight g' 0 1) 1.5 1e-12 = true := by
+  native_decide
+
+/-- Sequential elimination on path3: eliminate vertex 1, then vertex 0
+   from the result yields a single isolated vertex (vertex 2) with no
+   edges. -/
+example :
+    let g1 := eliminateVertex path3 1
+    let g2 := eliminateVertex g1 0
+    g2.edges.size = 0 := by
+  native_decide
+
+/-- The total weighted degree at the remaining vertices after eliminating
+   vertex 0 of star4 equals the sum of compensation contributions:
+   deg(1) = 1/3 + 1/2 = 5/6, deg(2) = 1/3 + 1 = 4/3, deg(3) = 1/2 + 1 = 3/2.
+   Verify deg(1) here. -/
+example :
+    let g' := eliminateVertex star4 0
+    fclose (degreeWeight g' 1) (5.0 / 6.0) 1e-12 = true := by
+  native_decide
+
 end HSCExamples
 
 end Curvenet

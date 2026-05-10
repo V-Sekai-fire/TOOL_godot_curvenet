@@ -118,6 +118,41 @@ example :
     DenseLinAlg.vecWithinEps v1 #[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0] 1e-9 = true := by
   native_decide
 
+/-- Scalar (k=1) case: constant boundary value 7.0 at the sample propagates
+   harmonically to a constant 7.0 at every unpromoted vertex. -/
+example :
+    let Fc : DenseLinAlg.Mat := #[7.0]
+    let Xv := solveMulti CutExamples.triangleWithSample triPositions oneSample Fc 1
+    let v1 := DenseLinAlg.get Xv 1 1 0
+    let v2 := DenseLinAlg.get Xv 1 2 0
+    Float.abs (v1 - 7.0) < 1e-9 && Float.abs (v2 - 7.0) < 1e-9 = true := by
+  native_decide
+
+/-- Asymmetric 3-column case: f_c = (1, 2, 3). Unpromoted vertices return
+   (1, 2, 3) — independence of components, no cross-coupling. -/
+example :
+    let Fc : DenseLinAlg.Mat := #[1.0, 2.0, 3.0]
+    let Xv := solveMulti CutExamples.triangleWithSample triPositions oneSample Fc 3
+    let v1 := #[DenseLinAlg.get Xv 3 1 0, DenseLinAlg.get Xv 3 1 1, DenseLinAlg.get Xv 3 1 2]
+    let v2 := #[DenseLinAlg.get Xv 3 2 0, DenseLinAlg.get Xv 3 2 1, DenseLinAlg.get Xv 3 2 2]
+    DenseLinAlg.vecWithinEps v1 #[1.0, 2.0, 3.0] 1e-9 &&
+    DenseLinAlg.vecWithinEps v2 #[1.0, 2.0, 3.0] 1e-9 = true := by
+  native_decide
+
+/-- 9-column rotated identity (R_z(90°) flattened) propagates as a rigid
+   matrix value across the unpromoted vertices. -/
+example :
+    -- R_z(90°) row-major: ((0, -1, 0), (1, 0, 0), (0, 0, 1))
+    let Fc : DenseLinAlg.Mat :=
+      #[0.0, -1.0, 0.0,
+        1.0,  0.0, 0.0,
+        0.0,  0.0, 1.0]
+    let Xv := solveMulti CutExamples.triangleWithSample triPositions oneSample Fc 9
+    let v1 : Array Float := Array.ofFn (n := 9)
+      (fun (j : Fin 9) => DenseLinAlg.get Xv 9 1 j.val)
+    DenseLinAlg.vecWithinEps v1 #[0.0, -1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0] 1e-9 = true := by
+  native_decide
+
 end HarmonicSolveExamples
 
 end Curvenet

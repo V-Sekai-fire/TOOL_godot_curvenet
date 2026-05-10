@@ -194,6 +194,64 @@ example :
     DenseLinAlg.vecWithinEps v1 #[1.0, 2.0, 0.0] 1e-9 = true := by
   native_decide
 
+/-- Pure rotation R_z(90°) applied at the sample (vertex 0 at origin
+   stays at origin under this rotation). The deformation gradient
+   propagates harmonically as the same rotation matrix; vertex 1
+   (rest at (1, 0, 0)) ends at R_z(90°)·(1, 0, 0) = (0, 1, 0). -/
+private def Fc_rotZ90 : DenseLinAlg.Mat :=
+  #[0.0, -1.0, 0.0,
+    1.0,  0.0, 0.0,
+    0.0,  0.0, 1.0]
+
+private def Xc_origin : DenseLinAlg.Mat := #[0.0, 0.0, 0.0]
+
+example :
+    let Xv := solveDeformation CutExamples.triangleWithSample triPositions oneSample
+                Fc_rotZ90 Xc_origin
+    let v1 : Array Float := #[DenseLinAlg.get Xv 3 1 0,
+                               DenseLinAlg.get Xv 3 1 1,
+                               DenseLinAlg.get Xv 3 1 2]
+    -- (1, 0, 0) rotated 90° about z = (0, 1, 0)
+    DenseLinAlg.vecWithinEps v1 #[0.0, 1.0, 0.0] 1e-9 = true := by
+  native_decide
+
+example :
+    let Xv := solveDeformation CutExamples.triangleWithSample triPositions oneSample
+                Fc_rotZ90 Xc_origin
+    let v2 : Array Float := #[DenseLinAlg.get Xv 3 2 0,
+                               DenseLinAlg.get Xv 3 2 1,
+                               DenseLinAlg.get Xv 3 2 2]
+    -- (0.5, 0, √3/2) rotated 90° about z = (0, 0.5, √3/2)
+    DenseLinAlg.vecWithinEps v2 #[0.0, 0.5, 0.8660254037844386] 1e-9 = true := by
+  native_decide
+
+/-- Uniform scale by 2 with the sample fixed at origin: every unpromoted
+   vertex's distance from the origin doubles. -/
+private def Fc_scale2 : DenseLinAlg.Mat :=
+  #[2.0, 0.0, 0.0,
+    0.0, 2.0, 0.0,
+    0.0, 0.0, 2.0]
+
+example :
+    let Xv := solveDeformation CutExamples.triangleWithSample triPositions oneSample
+                Fc_scale2 Xc_origin
+    let v1 : Array Float := #[DenseLinAlg.get Xv 3 1 0,
+                               DenseLinAlg.get Xv 3 1 1,
+                               DenseLinAlg.get Xv 3 1 2]
+    -- (1, 0, 0) scaled 2× = (2, 0, 0)
+    DenseLinAlg.vecWithinEps v1 #[2.0, 0.0, 0.0] 1e-9 = true := by
+  native_decide
+
+example :
+    let Xv := solveDeformation CutExamples.triangleWithSample triPositions oneSample
+                Fc_scale2 Xc_origin
+    let v2 : Array Float := #[DenseLinAlg.get Xv 3 2 0,
+                               DenseLinAlg.get Xv 3 2 1,
+                               DenseLinAlg.get Xv 3 2 2]
+    -- (0.5, 0, √3/2) scaled 2× = (1, 0, √3)
+    DenseLinAlg.vecWithinEps v2 #[1.0, 0.0, 1.7320508075688772] 1e-9 = true := by
+  native_decide
+
 end DeformSolveExamples
 
 end Curvenet

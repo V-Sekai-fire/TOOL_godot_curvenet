@@ -321,6 +321,50 @@ example :
     (nrm - 1.0).abs < 1e-12 := by
   native_decide
 
+-- Reflection / symmetry invariants on per-side data.
+
+/-- At a perpendicular 2-tangent intersection, every segment's plus-side
+   normal is the reflection of its minus-side normal across the segment's
+   tangent plane. -/
+example :
+    let pairs := perSideNormals perpendicular
+    let (np0, nm0) := pairs[0]!
+    let (np1, nm1) := pairs[1]!
+    ((np0.x + nm0.x).abs < 1e-12 ∧
+     (np0.y + nm0.y).abs < 1e-12 ∧
+     (np0.z + nm0.z).abs < 1e-12 ∧
+     (np1.x + nm1.x).abs < 1e-12 ∧
+     (np1.y + nm1.y).abs < 1e-12 ∧
+     (np1.z + nm1.z).abs < 1e-12) := by
+  native_decide
+
+/-- At the symmetric triJunction (3 unit segments), per-side widths are
+   equal across plus/minus for every segment under uniform lengths. -/
+example :
+    let widths := perSideWidths triJunction
+    let (wp0, wm0) := widths[0]!
+    let (wp1, wm1) := widths[1]!
+    let (wp2, wm2) := widths[2]!
+    ((wp0 - wm0).abs < 1e-12 ∧
+     (wp1 - wm1).abs < 1e-12 ∧
+     (wp2 - wm2).abs < 1e-12) := by
+  native_decide
+
+/-- scaledFrame is homogeneous when l = w. -/
+example :
+    let unitF  := scaledFrame ⟨1.0, 0.0, 0.0⟩ ⟨0.0, 0.0, 1.0⟩ 1.0 1.0
+    let scaled := scaledFrame ⟨1.0, 0.0, 0.0⟩ ⟨0.0, 0.0, 1.0⟩ 2.0 2.0
+    ((scaled[0]! - 2.0 * unitF[0]!).abs < 1e-12 ∧
+     (scaled[1]! - 2.0 * unitF[1]!).abs < 1e-12 ∧
+     (scaled[2]! - 2.0 * unitF[2]!).abs < 1e-12 ∧
+     (scaled[3]! - 2.0 * unitF[3]!).abs < 1e-12 ∧
+     (scaled[4]! - 2.0 * unitF[4]!).abs < 1e-12 ∧
+     (scaled[5]! - 2.0 * unitF[5]!).abs < 1e-12 ∧
+     (scaled[6]! - 2.0 * unitF[6]!).abs < 1e-12 ∧
+     (scaled[7]! - 2.0 * unitF[7]!).abs < 1e-12 ∧
+     (scaled[8]! - 2.0 * unitF[8]!).abs < 1e-12) := by
+  native_decide
+
 end IntersectionFramesExamples
 
 end Curvenet

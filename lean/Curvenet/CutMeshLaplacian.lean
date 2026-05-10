@@ -146,6 +146,38 @@ example :
     let M := assembleVtLhV CutExamples.uncutQuad quadPositions
     PolygonLaplacian.isSymmetricWithin M 4 1e-12 = true := by native_decide
 
+/-- Two-triangle strip vertex positions (z-axis triangle pair). -/
+private def stripPositions : Array Vec3 :=
+  #[ ⟨0.0, 0.0, 0.0⟩
+   , ⟨1.0, 0.0, 0.0⟩
+   , ⟨0.5, 0.0, 0.8660254037844386⟩
+   , ⟨1.5, 0.0, 0.8660254037844386⟩
+   ]
+
+/-- VᵀLₕV on the two-triangle strip is 4×4. -/
+example : (assembleVtLhV CutExamples.uncutTwoTriStrip stripPositions).size = 16 := by native_decide
+
+/-- Two-triangle-strip VᵀLₕV is symmetric. -/
+example :
+    let M := assembleVtLhV CutExamples.uncutTwoTriStrip stripPositions
+    PolygonLaplacian.isSymmetricWithin M 4 1e-10 = true := by native_decide
+
+/-- Two-triangle-strip VᵀLₕV has the constant vector in its null space. -/
+example :
+    let M := assembleVtLhV CutExamples.uncutTwoTriStrip stripPositions
+    PolygonLaplacian.rowSumsWithin M 4 1e-10 = true := by native_decide
+
+/-- VᵀLₕV on the cut-mesh `triangleWithSample` is 3×3 (sample-promoted
+   vertex 0 contributes a degenerate row, but the matrix dimension is
+   still nv × nv). -/
+example : (assembleVtLhV CutExamples.triangleWithSample triPositions).size = 9 := by native_decide
+
+/-- The cut-mesh VᵀLₕV is symmetric — promotion to a sample doesn't break
+   symmetry. -/
+example :
+    let M := assembleVtLhV CutExamples.triangleWithSample triPositions
+    PolygonLaplacian.isSymmetricWithin M 3 1e-10 = true := by native_decide
+
 end CutMeshLaplacianExamples
 
 end Curvenet

@@ -16,6 +16,9 @@ Modules organised by §:
 
 import Curvenet.Vec3
 import Curvenet.Halfedge
+import Curvenet.HalfedgeBuilder
+import Curvenet.CurvenetBuilder
+import Curvenet.SurfaceProjection
 import Curvenet.PolygonLaplacian
 import Curvenet.RobustLaplacian
 import Curvenet.CutMesh

@@ -225,6 +225,44 @@ example :
     -- 4 entries but most are zero. Only the diagonal sums non-zero.
     fclose (sparseRowSum sp[0]!) 1.0 1e-12 = true := by native_decide
 
+-- Composition: sparsifyTopK . smoothWeights preserves partition of unity
+-- when applied to a partition-of-unity input. This is the bind-time
+-- invariant for DDM weight cooking.
+
+private def sparseToWeightMatrix (sp : Array (Array (Nat × Float))) (cols : Nat) : WeightMatrix :=
+  sp.map fun row =>
+    Id.run do
+      let mut out : Array Float := Array.replicate cols 0.0
+      for (j, v) in row do
+        if j < cols then out := out.set! j v
+      pure out
+
+/-- smoothWeights then sparsifyTopK preserves partition of unity on an
+   identity weight matrix over the path-4 graph (K = 2). -/
+example :
+    let W1 := smoothWeights identityW path4Adj 2 0.5
+    let sp := sparsifyTopK W1 2
+    let W2 := sparseToWeightMatrix sp 4
+    partitionOfUnity W2 1e-9 = true := by
+  native_decide
+
+/-- Same composition, K = 4 (no truncation), still partition of unity. -/
+example :
+    let W1 := smoothWeights identityW path4Adj 2 0.5
+    let sp := sparsifyTopK W1 4
+    let W2 := sparseToWeightMatrix sp 4
+    partitionOfUnity W2 1e-9 = true := by
+  native_decide
+
+/-- Composition on the half-half row matrix (already partition of unity)
+   with smoothing + top-K = 1 still preserves the row sum to 1. -/
+example :
+    let W1 := smoothWeights halfW path4Adj 1 0.3
+    let sp := sparsifyTopK W1 1
+    let W2 := sparseToWeightMatrix sp 2
+    partitionOfUnity W2 1e-9 = true := by
+  native_decide
+
 end DirectDeltaMushBindExamples
 
 end Curvenet

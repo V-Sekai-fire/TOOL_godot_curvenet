@@ -239,6 +239,31 @@ example :
     let M : Mat3 := mat3Mk 2.0 1.0 0.0  1.0 2.0 1.0  0.0 1.0 2.0
     mat3WithinEps (deformationGradient M M) mat3Identity 1e-10 = true := by native_decide
 
+/-- Round-trip in the other direction: M · inv(M) = I. -/
+example :
+    let M : Mat3 := mat3Mk 2.0 1.0 0.0  1.0 2.0 1.0  0.0 1.0 2.0
+    mat3WithinEps (mat3Mul M (mat3Inv M)) mat3Identity 1e-10 = true := by native_decide
+
+/-- Round-trip on a non-symmetric invertible frame. -/
+example :
+    let M : Mat3 := mat3Mk 1.0 2.0 3.0  0.0 1.0 4.0  5.0 6.0 0.0
+    mat3WithinEps (mat3Mul M (mat3Inv M)) mat3Identity 1e-10 = true := by native_decide
+
+/-- Round-trip in the other direction on the same non-symmetric frame. -/
+example :
+    let M : Mat3 := mat3Mk 1.0 2.0 3.0  0.0 1.0 4.0  5.0 6.0 0.0
+    mat3WithinEps (mat3Mul (mat3Inv M) M) mat3Identity 1e-10 = true := by native_decide
+
+/-- Inverse is involutive: inv(inv(M)) = M (modulo float precision). -/
+example :
+    let M : Mat3 := mat3Mk 2.0 1.0 0.0  1.0 2.0 1.0  0.0 1.0 2.0
+    mat3WithinEps (mat3Inv (mat3Inv M)) M 1e-9 = true := by native_decide
+
+/-- Round-trip on a rotation matrix: R · R⁻¹ = I. -/
+example :
+    let R90 : Mat3 := mat3Mk 0.0 (-1.0) 0.0  1.0 0.0 0.0  0.0 0.0 1.0
+    mat3WithinEps (mat3Mul R90 (mat3Inv R90)) mat3Identity 1e-12 = true := by native_decide
+
 end ScaledFramesExamples
 
 end Curvenet
