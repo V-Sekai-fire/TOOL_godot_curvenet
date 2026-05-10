@@ -23,6 +23,9 @@ import Curvenet.SlangCodegen.CutMesh
 import Curvenet.SlangCodegen.CutAlgorithm
 import Curvenet.SlangCodegen.SurfaceProjection
 import Curvenet.SlangCodegen.CurvenetBuilder
+import Curvenet.SlangCodegen.IncompleteCholesky
+import Curvenet.SlangCodegen.HierarchicalSparsify
+import Curvenet.SlangCodegen.CutMeshLaplacian
 
 /-!
 # `Curvenet.SlangCodegen` — Slang shader codegen umbrella

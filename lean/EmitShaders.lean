@@ -43,6 +43,9 @@ private def kernels : List (String × SlangShaderModule) :=
   , ("cut_algorithm",     CutAlgorithm.shader)
   , ("surface_projection", SurfaceProjection.shader)
   , ("curvenet_builder",  CurvenetBuilder.shader)
+  , ("incomplete_cholesky", IncompleteCholesky.shader)
+  , ("hierarchical_sparsify", HierarchicalSparsify.shader)
+  , ("cut_mesh_laplacian", CutMeshLaplacian.shader)
   ]
 
 def main (args : List String) : IO UInt32 := do
