@@ -62,3 +62,4 @@ tests/mire_body_70k_data.h
 # Lake fetched dependencies + build cache.
 lean/.lake/
 lean/lake-packages/
+tests/slang_validate/build/
