@@ -90,26 +90,32 @@ LOC of Lean harness.
 | solver kernels      | `Curvenet.{DenseLinAlg, SparseLinAlg, IncompleteCholesky, HierarchicalSparsifyCompensate, GraphColoring}` | `Curvenet.SlangCodegen.{DenseLinAlg, SparseLinAlg, IncompleteCholesky, HierarchicalSparsify}` plus the BLAS / preconditioner kernels (`Axpy`, `AxpyMulti`, `Saxpby`, `SaxpbyMulti`, `Jacobi`, `JacobiMulti`, `Spmv`, `SpmvMulti`, `DotReduce`, `DotReduceMulti`, `SgsColor`) |
 | §4.3 solve          | `Curvenet.{HarmonicSolve, DeformSolve}`                                                                   | `Curvenet.SlangCodegen.{HarmonicSolve, DeformSolve}`                                                                                                                                                                                                                         |
 | runtime kernel      | `Curvenet.{DirectDeltaMush, DirectDeltaMushBind}`                                                         | `Curvenet.SlangCodegen.DirectDeltaMush`                                                                                                                                                                                                                                      |
-| shared helpers      | (none)                                                                                                    | `Curvenet.SlangCodegen.Common` (type aliases, mat3 storage, 3×3 inverse, cot weight, four Knuth/Dekker EFT primitives)                                                                                                                                                       |
+| shared helpers      | `Curvenet.Common` (`fclose` predicate, `Mat3` abbrev, `Adjacency` abbrev)                                 | `Curvenet.SlangCodegen.Common` (type aliases, mat3 storage, 3×3 inverse, cot weight, four Knuth/Dekker EFT primitives)                                                                                                                                                       |
 
 ## Continuous integration
 
-[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs two
-jobs on every push and PR:
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs one
+`validate` job on `macos-14` for every push and PR. Apple Silicon
+covers everything (`lake build`, the SPIR-V path, the cpp-target
+real-input harness, the FFI equivalence proof) and uniquely covers
+the Metal AOT chain that needs `xcrun metal`. `macos-13` Intel
+runners lack GPU paravirtualization, so the runner stays pinned to
+`macos-14`.
 
-- **`lean-and-slang`** on `ubuntu-latest`: `lake build` (every
-  `native_decide`), `slangc -target spirv` round-trip on all 32
-  kernels (asserts SPIR-V magic `0x07230203` + size > 100 bytes),
-  the slang_validate harness, and the `axpy_validate` equivalence
-  check.
-- **`metal`** on `macos-14`: same as above plus the full Slang →
-  `.metal` source → `xcrun metal` (.air) → `xcrun metallib` chain
-  (asserts `MTLB` magic). `macos-13` Intel runners lack GPU
-  paravirtualization, so this job stays pinned to Apple Silicon.
+Steps inside the single job:
+
+1. `lake build` (every `native_decide`).
+2. `slangc -target spirv` round-trip on all 32 kernels (asserts
+   SPIR-V magic `0x07230203` + size > 100 bytes).
+3. `slangc -target metal` + `xcrun metal` + `xcrun metallib`
+   (asserts `MTLB` magic).
+4. `make -C tests/slang_validate test` (real-input C++ harness for
+   axpy, saxpby, jacobi).
+5. `lake exe axpy_validate` (Lean equivalence).
 
 The `main` branch is protected: every change goes through a PR with
-both checks green before it can land. `enforce_admins: true`. Admins
-included, no bypass.
+the `validate` check green before it can land. `enforce_admins: true`.
+Admins included, no bypass.
 
 ## Slang language reference
 
