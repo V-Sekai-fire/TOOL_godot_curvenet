@@ -1,4 +1,5 @@
 import LeanSlang
+import Curvenet.SlangCodegen.Common
 
 /-!
 # `Curvenet.SlangCodegen.CutAlgorithm` — per-face cut classification
@@ -22,8 +23,8 @@ Bindings:
 namespace Curvenet.SlangCodegen.CutAlgorithm
 
 open LeanSlang
+open Curvenet.SlangCodegen.Common
 
-private def uintTy : SlangType := .scalar .uint
 
 def shader : SlangShaderModule :=
   { structs :=

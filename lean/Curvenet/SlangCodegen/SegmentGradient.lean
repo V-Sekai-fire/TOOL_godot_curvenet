@@ -1,4 +1,5 @@
 import LeanSlang
+import Curvenet.SlangCodegen.Common
 
 /-!
 # `Curvenet.SlangCodegen.SegmentGradient` — isolated-segment F dispatcher
@@ -25,11 +26,8 @@ Bindings (set 0):
 namespace Curvenet.SlangCodegen.SegmentGradient
 
 open LeanSlang
+open Curvenet.SlangCodegen.Common
 
-private def floatTy : SlangType := .scalar .float
-private def f3Ty    : SlangType := .vec .float 3
-private def m3Ty    : SlangType := .mat .float 3 3
-private def uintTy  : SlangType := .scalar .uint
 
 /-- `skew(v) = [ 0 -vz vy; vz 0 -vx; -vy vx 0 ]`. -/
 private def skew3 : SlangFunctionDecl :=

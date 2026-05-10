@@ -1,4 +1,5 @@
 import LeanSlang
+import Curvenet.SlangCodegen.Common
 
 /-!
 # `Curvenet.SlangCodegen.Halfedge` — per-halfedge bounds check
@@ -25,10 +26,8 @@ Halfedge SoA layout:
 namespace Curvenet.SlangCodegen.Halfedge
 
 open LeanSlang
+open Curvenet.SlangCodegen.Common
 
-private def floatTy : SlangType := .scalar .float
-private def intTy   : SlangType := .scalar .int
-private def uintTy  : SlangType := .scalar .uint
 
 def shader : SlangShaderModule :=
   { structs :=

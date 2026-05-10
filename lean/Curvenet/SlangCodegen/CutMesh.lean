@@ -1,4 +1,5 @@
 import LeanSlang
+import Curvenet.SlangCodegen.Common
 
 /-!
 # `Curvenet.SlangCodegen.CutMesh` — per-face curve-crossing predicate
@@ -22,9 +23,8 @@ Bindings:
 namespace Curvenet.SlangCodegen.CutMesh
 
 open LeanSlang
+open Curvenet.SlangCodegen.Common
 
-private def floatTy : SlangType := .scalar .float
-private def uintTy  : SlangType := .scalar .uint
 
 def shader : SlangShaderModule :=
   { structs :=

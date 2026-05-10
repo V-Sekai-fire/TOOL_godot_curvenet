@@ -1,4 +1,5 @@
 import LeanSlang
+import Curvenet.SlangCodegen.Common
 
 /-!
 # `Curvenet.SlangCodegen.IncompleteCholesky` — per-row IC(0) update
@@ -32,10 +33,8 @@ Bindings (set 0):
 namespace Curvenet.SlangCodegen.IncompleteCholesky
 
 open LeanSlang
+open Curvenet.SlangCodegen.Common
 
-private def floatTy : SlangType := .scalar .float
-private def intTy   : SlangType := .scalar .int
-private def uintTy  : SlangType := .scalar .uint
 
 def shader : SlangShaderModule :=
   { structs :=

@@ -1,4 +1,5 @@
 import LeanSlang
+import Curvenet.SlangCodegen.Common
 
 /-!
 # `Curvenet.SlangCodegen.PolygonLaplacian` — per-triangle cot Laplacian
@@ -27,10 +28,8 @@ Bindings (set 0):
 namespace Curvenet.SlangCodegen.PolygonLaplacian
 
 open LeanSlang
+open Curvenet.SlangCodegen.Common
 
-private def floatTy : SlangType := .scalar .float
-private def f3Ty    : SlangType := .vec .float 3
-private def uintTy  : SlangType := .scalar .uint
 
 /-- `cot_at_apex(apex, o1, o2) = dot(a, b) / length(cross(a, b))`
     where a = o1 - apex, b = o2 - apex. -/

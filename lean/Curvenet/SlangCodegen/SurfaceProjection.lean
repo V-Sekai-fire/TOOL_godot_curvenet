@@ -1,4 +1,5 @@
 import LeanSlang
+import Curvenet.SlangCodegen.Common
 
 /-!
 # `Curvenet.SlangCodegen.SurfaceProjection` — per-vertex closest-triangle
@@ -23,11 +24,8 @@ Bindings:
 namespace Curvenet.SlangCodegen.SurfaceProjection
 
 open LeanSlang
+open Curvenet.SlangCodegen.Common
 
-private def floatTy : SlangType := .scalar .float
-private def intTy   : SlangType := .scalar .int
-private def uintTy  : SlangType := .scalar .uint
-private def f3Ty    : SlangType := .vec .float 3
 
 /-- Closest point on triangle (a, b, c) to query q, returning the
     projected float3. Implements the standard 7-region case split

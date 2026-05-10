@@ -1,9 +1,12 @@
 % Bibliographic references for the algorithms implemented in this
-% project. The two load-bearing Pixar papers are cited throughout the
-% Lean spec and C++ runtime; the remaining entries are referenced from
-% the deferred-work design docs under todos/ as candidate upgrades to
-% the polygon Laplacian, the cut-mesh straightest-path, and the
-% mean-value coordinate scheme.
+% project. The two load-bearing Pixar papers are cited throughout
+% the Lean spec (lean/Curvenet/) and the Slang shader codegen
+% (lean/Curvenet/SlangCodegen/). The remaining entries are
+% referenced from the deferred-work design docs under todos/ as
+% candidate upgrades to the polygon Laplacian, the cut-mesh
+% straightest-path, and the mean-value coordinate scheme — plus
+% the runtime kernel (Direct Delta Mush) and the df32 dot product
+% used by the GPU CG path.
 
 % =================================================================
 % Load-bearing: the algorithm this project implements.
@@ -36,6 +39,49 @@
   address    = {New York, NY, USA},
   doi        = {10.1145/3587421.3595415},
   url        = {https://doi.org/10.1145/3587421.3595415}
+}
+
+% =================================================================
+% Direct Delta Mush — runtime kernel that bakes the §4.3 harmonic
+% solve once at bind time and replays it as a sparse linear
+% combination per vertex. Spec'd in lean/Curvenet/DirectDeltaMush.lean
+% and emitted as Slang in lean/Curvenet/SlangCodegen/DirectDeltaMush.lean.
+% =================================================================
+
+@article{LeLewis2019DirectDeltaMush,
+  author     = {Le, Binh Huy and Lewis, J. P.},
+  title      = {Direct Delta Mush Skinning and Variants},
+  journal    = {ACM Transactions on Graphics},
+  volume     = {38},
+  number     = {4},
+  articleno  = {113},
+  numpages   = {13},
+  year       = {2019},
+  month      = jul,
+  doi        = {10.1145/3306346.3322982}
+}
+
+% =================================================================
+% Slang shader language — Lean → Slang codegen runs through
+% LeanSlang (V-Sekai-fire/lean-slang) and the shaders compile via
+% slangc to SPIR-V (Vulkan / Quest 3) and Metal (Apple Silicon).
+% =================================================================
+
+@misc{ShaderSlang,
+  author       = {{Shader-Slang Contributors}},
+  title        = {{Slang}: A Shader Language with First-Class Support
+                   for Generics, Compute, and Multi-Backend Codegen},
+  howpublished = {\url{https://github.com/shader-slang/slang}},
+  year         = {2017--2026},
+  note         = {Language reference at
+                  \url{https://github.com/shader-slang/spec}}
+}
+
+@misc{AppleMSL,
+  author       = {{Apple Inc.}},
+  title        = {Metal Shading Language Specification},
+  howpublished = {\url{https://developer.apple.com/metal/Metal-Shading-Language-Specification.pdf}},
+  year         = {2014--2026}
 }
 
 % =================================================================
@@ -109,9 +155,9 @@
 % =================================================================
 % Cut-mesh straightest-path — DeGoes22 §4.1 uses Polthier-Schmies
 % to trace curvenet segments across multiple mesh polygons. The
-% current Lean spec stubs this; the C++ runtime takes a caller-
-% supplied edge-crossing list. Implementing the geometric trace is
-% deferred (see slice 20 + todos).
+% current Lean spec stubs this; the Slang `cut_algorithm` kernel
+% takes a caller-supplied edge-crossing list. Implementing the
+% geometric trace is deferred (see slice 20 + todos).
 % =================================================================
 
 @inproceedings{Polthier1998Straightest,
@@ -200,7 +246,10 @@
 % fp64. Useful as a fallback if we ever can't afford the CPU residual
 % roundtrip on Quest 3, but the inner kernels become 3-8x slower per
 % op + 2x memory bandwidth, so iterative refinement (Buttari/Carson) is
-% the cheaper default.
+% the cheaper default. The error-free transformations themselves go back
+% to Knuth and Dekker; Da Graça-Defour 2006 specialised them to fp32
+% and gave the GPU implementation that
+% lean/Curvenet/SlangCodegen/DotReduce.lean mirrors.
 @inproceedings{DaGraca2006FloatFloat,
   author    = {Da Gra\c{c}a, Guillaume and Defour, David},
   title     = {Implementation of Float-Float Operators on Graphics
@@ -208,6 +257,30 @@
   booktitle = {Real Numbers and Computers (RNC 7)},
   year      = {2006},
   pages     = {23--32}
+}
+
+@book{Knuth1981Seminumerical,
+  author    = {Knuth, Donald E.},
+  title     = {The Art of Computer Programming, Volume 2:
+               Seminumerical Algorithms},
+  edition   = {2nd},
+  publisher = {Addison-Wesley},
+  year      = {1981},
+  note      = {{\S}4.2.2 covers the ``two\_sum'' / ``twosum''
+                exact-summation primitive used in the EFTs;
+                the FMA-based ``two\_prod'' folds in trivially.}
+}
+
+@article{Dekker1971FloatingPoint,
+  author    = {Dekker, T. J.},
+  title     = {A Floating-Point Technique for Extending the Available
+                Precision},
+  journal   = {Numerische Mathematik},
+  volume    = {18},
+  number    = {3},
+  pages     = {224--242},
+  year      = {1971},
+  doi       = {10.1007/BF01397083}
 }
 
 % =================================================================
@@ -407,9 +480,11 @@
 }
 
 % =================================================================
-% Heavy-edge matching for connectivity-aware multilevel aggregation
-% (used in src/curvenet/heavy_edge_matching.h to coarsen the meshlet
-% adjacency graph for the multi-level Schwarz hierarchy).
+% Heavy-edge matching for connectivity-aware multilevel aggregation —
+% Karypis-Kumar's METIS algorithm. Originally implemented in a now-
+% deleted src/curvenet/heavy_edge_matching.h; the same coarsening
+% pattern survives in lean/Curvenet/HierarchicalSparsifyCompensate.lean
+% and the Slang `hierarchical_sparsify` kernel.
 % =================================================================
 
 @article{KarypisKumar1998Metis,

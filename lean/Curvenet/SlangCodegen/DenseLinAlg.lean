@@ -1,4 +1,5 @@
 import LeanSlang
+import Curvenet.SlangCodegen.Common
 
 /-!
 # `Curvenet.SlangCodegen.DenseLinAlg` — small-system dense solve
@@ -26,9 +27,8 @@ shader's `N_MAX` literal to match the host's max dimension.
 namespace Curvenet.SlangCodegen.DenseLinAlg
 
 open LeanSlang
+open Curvenet.SlangCodegen.Common
 
-private def floatTy : SlangType := .scalar .float
-private def uintTy  : SlangType := .scalar .uint
 
 def shader : SlangShaderModule :=
   { structs :=

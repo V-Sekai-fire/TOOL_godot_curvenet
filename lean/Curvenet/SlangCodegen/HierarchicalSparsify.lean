@@ -1,4 +1,5 @@
 import LeanSlang
+import Curvenet.SlangCodegen.Common
 
 /-!
 # `Curvenet.SlangCodegen.HierarchicalSparsify` — coarse-vertex restriction
@@ -27,10 +28,8 @@ mapping; this kernel models the per-coarse summation shape.
 namespace Curvenet.SlangCodegen.HierarchicalSparsify
 
 open LeanSlang
+open Curvenet.SlangCodegen.Common
 
-private def floatTy : SlangType := .scalar .float
-private def intTy   : SlangType := .scalar .int
-private def uintTy  : SlangType := .scalar .uint
 
 def shader : SlangShaderModule :=
   { structs :=

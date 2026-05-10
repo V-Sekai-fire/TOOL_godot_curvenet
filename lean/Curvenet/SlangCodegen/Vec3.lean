@@ -1,4 +1,5 @@
 import LeanSlang
+import Curvenet.SlangCodegen.Common
 
 /-!
 # `Curvenet.SlangCodegen.Vec3` — float3 baseline shader
@@ -19,10 +20,8 @@ assume.
 namespace Curvenet.SlangCodegen.Vec3
 
 open LeanSlang
+open Curvenet.SlangCodegen.Common
 
-private def floatTy : SlangType := .scalar .float
-private def f3Ty    : SlangType := .vec .float 3
-private def uintTy  : SlangType := .scalar .uint
 
 def shader : SlangShaderModule :=
   { structs :=
