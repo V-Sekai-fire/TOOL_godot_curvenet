@@ -22,12 +22,14 @@ This file exposes the dispatcher so that the §4.3 constraint matrix
 formula at the call site.
 -/
 
+import Curvenet.Common
 import Curvenet.ScaledFrames
 import Curvenet.Vec3
 
 namespace Curvenet
 namespace SegmentGradient
 
+open Curvenet.Common
 open ScaledFrames
 
 /-- Isolated-curve deformation gradient. For a segment running
@@ -75,6 +77,7 @@ end SegmentGradient
 
 namespace SegmentGradientExamples
 
+open Curvenet.Common
 open ScaledFrames
 open SegmentGradient
 

@@ -39,7 +39,11 @@ Native-decide checks at the end verify on a 3-vertex path graph
 elimination produces the correct compensated weights.
 -/
 
+import Curvenet.Common
+
 namespace Curvenet
+
+open Curvenet.Common
 namespace HSC
 
 /-- An undirected weighted graph as a flat edge list. Each edge
@@ -120,8 +124,6 @@ def eliminateVertex (g : Graph) (v : Nat) : Graph := Id.run do
           newEdges := newEdges.push (lo, hi, comp)
   return { numVerts := g.numVerts, edges := newEdges }
 
-/-- Tolerance-aware Float comparison. -/
-def fclose (x y eps : Float) : Bool := (x - y).abs < eps
 
 end HSC
 

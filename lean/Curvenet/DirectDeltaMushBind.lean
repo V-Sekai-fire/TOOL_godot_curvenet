@@ -39,7 +39,11 @@ with 2 handles:
   * partition-of-unity holds before and after both ops
 -/
 
+import Curvenet.Common
+
 namespace Curvenet
+
+open Curvenet.Common
 namespace DirectDeltaMushBind
 
 /-- Per-vertex weight matrix as nested Array. Outer index is
@@ -48,15 +52,9 @@ namespace DirectDeltaMushBind
    list — the bridge is `sparsifyTopK` defined below. -/
 abbrev WeightMatrix := Array (Array Float)
 
-/-- Per-vertex adjacency list — vertex v's neighbors used by
-   `smoothWeights`. Same shape as `GraphColoring.Adjacency`. -/
-abbrev Adjacency := Array (Array Nat)
-
 /-- Sum of one vertex's row. -/
 def rowSum (row : Array Float) : Float := row.foldl (· + ·) 0.0
 
-/-- Tolerance-aware Float compare. -/
-def fclose (a b eps : Float) : Bool := (a - b).abs < eps
 
 /-- Per-row partition-of-unity check: every row sum is within
    `eps` of 1.0. -/

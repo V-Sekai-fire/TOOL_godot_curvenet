@@ -8,13 +8,18 @@ on:
   workflow_dispatch:
 
 # Opt every actions/* invocation into Node 24 ahead of the September 2026
-# Node 20 removal — silences the deprecation warning on cache@v4 / checkout@v4.
+# Node 20 removal: silences the deprecation warning on cache@v4 / checkout@v4.
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  lean-and-slang:
-    runs-on: ubuntu-latest
+  validate:
+    # macos-14 (Apple Silicon) covers everything: Lean's lake build, the
+    # SPIR-V round-trip via slangc, the slang_validate harness, the
+    # axpy_validate FFI equivalence proof, AND the Slang -> Metal AOT
+    # compile chain that needs xcrun metal. macos-13 Intel runners lack
+    # GPU paravirtualization, so we stay on macos-14 / macos-latest.
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
 
@@ -25,7 +30,7 @@ jobs:
             ~/.elan
             lean/.lake/packages
             lean/.lake/build
-          key: elan-lake-${{ hashFiles('lean/lean-toolchain', 'lean/lake-manifest.json') }}
+          key: elan-lake-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('lean/lean-toolchain', 'lean/lake-manifest.json') }}
 
       - name: Install elan / Lean
         run: |
@@ -37,7 +42,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: bin/.slang
-          key: slang-${{ hashFiles('misc/install-slang.sh') }}
+          # OS + arch is essential here — slangc is a native binary, so a
+          # cache populated by a Linux runner is unusable on macOS aarch64
+          # and vice versa.
+          key: slang-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('misc/install-slang.sh') }}
 
       - name: Fetch slangc
         run: |
@@ -46,7 +54,7 @@ jobs:
           fi
           bin/slangc -v
 
-      - name: lake build (slangc available so axpy_native links)
+      - name: lake build
         working-directory: lean
         run: lake build
 
@@ -56,7 +64,7 @@ jobs:
           mkdir -p /tmp/emitted_shaders
           lake exe emit_shaders /tmp/emitted_shaders
 
-      - name: slangc -target spirv round-trip on all kernels
+      - name: Layer 1 — slangc -target spirv round-trip on every kernel
         run: |
           ok=0; total=0; failed=
           for f in /tmp/emitted_shaders/*.slang; do
@@ -65,7 +73,7 @@ jobs:
             if bin/slangc -target spirv -profile sm_6_5 -stage compute \
                  -entry main -o "$spv" "$f" 2>/tmp/slangc_err.log; then
               magic=$(xxd -l 4 -p "$spv")
-              size=$(stat -c%s "$spv")
+              size=$(stat -f%z "$spv")
               if [ "$magic" = "03022307" ] && [ "$size" -gt 100 ]; then
                 ok=$((ok+1))
               else
@@ -82,75 +90,18 @@ jobs:
             exit 1
           fi
 
-      - name: Real-input validators (slangc -target cpp + clang + run)
-        run: make -C tests/slang_validate test
-
-      - name: Lean equivalence proofs (spec ≡ slangc-emitted kernel)
-        working-directory: lean
-        run: |
-          lake build axpy_validate
-          lake exe  axpy_validate
-
-  metal:
-    # Apple Silicon runner — Metal API is paravirtualized through to the M1
-    # GPU. Intel macos runners (macos-13 and earlier) lack GPU passthrough;
-    # this job MUST stay on macos-14 / macos-latest.
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Cache .elan + lake-packages
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.elan
-            lean/.lake/packages
-            lean/.lake/build
-          key: elan-lake-mac-${{ hashFiles('lean/lean-toolchain', 'lean/lake-manifest.json') }}
-
-      - name: Install elan / Lean
-        run: |
-          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
-            | sh -s -- -y --default-toolchain none
-          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
-
-      - name: Cache Slang toolchain (macOS aarch64)
-        uses: actions/cache@v4
-        with:
-          path: bin/.slang
-          key: slang-mac-${{ hashFiles('misc/install-slang.sh') }}
-
-      - name: Fetch slangc
-        run: |
-          if [ ! -x bin/.slang/bin/slangc ]; then
-            misc/install-slang.sh
-          fi
-          bin/slangc -v
-
-      - name: lake build (slangc available so axpy_native links)
-        working-directory: lean
-        run: lake build
-
-      - name: Emit every Slang kernel
-        working-directory: lean
-        run: |
-          mkdir -p /tmp/emitted_shaders
-          lake exe emit_shaders /tmp/emitted_shaders
-
       - name: Verify metal toolchain available
         run: |
           xcrun -sdk macosx metal --version
           xcrun -sdk macosx metallib --version
 
-      - name: slangc -target metal + xcrun metal + xcrun metallib (every kernel)
+      - name: Layer 2 — slangc -target metal + xcrun metal + xcrun metallib
         run: |
-          # Three known-bad kernels under the current Slang Metal target —
-          # filed as upstream issues, not blockers for the SPIR-V path.
-          #
-          # direct_delta_mush — slangc internal error
-          #   "Unknown addressspace encountered" when emitting Metal for
-          #   our float4x4 + multi-buffer index pattern. SPIR-V target
-          #   compiles cleanly; bug is Metal-codegen-side in slangc.
+          # direct_delta_mush hits an upstream slangc internal error
+          # on the Metal target ("Unknown addressspace encountered")
+          # when emitting our float4x4 + multi-buffer index pattern.
+          # SPIR-V target compiles cleanly; bug is Metal-codegen-side
+          # in slangc.
           KNOWN_BAD="direct_delta_mush"
 
           is_known_bad() {
@@ -205,7 +156,10 @@ jobs:
             exit 1
           fi
 
-      - name: Lean equivalence proofs (Apple Silicon)
+      - name: Layer 3 — slangc -target cpp + clang + run on known inputs
+        run: make -C tests/slang_validate test
+
+      - name: Layer 4 — Lean equivalence (spec = slangc-emitted kernel)
         working-directory: lean
         run: |
           lake build axpy_validate
