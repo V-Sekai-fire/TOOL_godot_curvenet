@@ -175,6 +175,17 @@ def main (args : List String) : IO UInt32 := do
   if boneParents.size ≠ nBones then
     throw (.userError s!"bone_parents size {boneParents.size} ≠ bone_names size {nBones}")
 
+  -- Refuse Z-up input. The decoder writes a true Y-up `.glb`; its bone
+  -- TRS / IBM / vertex data must already be Y-up. Run the upstream
+  -- `safetensors_zup_to_yup` kernel first.
+  match st.metadataAt "source_axes" with
+  | some "Y-up" => pure ()
+  | some other =>
+    throw (.userError s!"safetensors_to_gltf: refusing source_axes=\"{other}\" input — run `safetensors_zup_to_yup` first")
+  | none =>
+    -- No metadata at all is acceptable for hand-authored test inputs.
+    pure ()
+
   -- ## State for accessors / bufferViews. We use the safetensors body as
   -- the BIN chunk verbatim; per-tensor offsets/lengths feed bufferViews.
   let mut bufferViews : Array BufferView := #[]
@@ -297,9 +308,13 @@ def main (args : List String) : IO UInt32 := do
     let p := boneParents[j]!
     if p >= 0 && p.toNat < nBones then
       let pi := p.toNat
-      childrenOfBone := childrenOfBone.set! pi (childrenOfBone[pi]!.push (1 + j))
+      childrenOfBone := childrenOfBone.set! pi (childrenOfBone[pi]!.push j)
 
-  -- Bone i lives at node index `1 + i` (node 0 is the root rotation node).
+  -- Bone i lives at node index `i` directly. The buffer data is in
+  -- glTF's required Y-up frame (the `safetensors_zup_to_yup` kernel
+  -- baked the rotation into POSITION, NORMAL, root-bone TRS, and IBM
+  -- tensors), so there's no axis-conversion node to thread bones
+  -- under any longer.
   let mut boneNodes : Array Node := #[]
   for i in [:nBones] do
     let tx := readFp32LE btBytes (12*i + 0)
@@ -320,11 +335,11 @@ def main (args : List String) : IO UInt32 := do
       children := childrenOfBone[i]!
     }
 
-  -- ## Skin: joint palette = all bone nodes
-  let skinJoints : Array Nat := Array.range nBones |>.map (· + 1)
+  -- ## Skin: joint palette = all bone nodes (bone i is at node index i)
+  let skinJoints : Array Nat := Array.range nBones
   let firstRootBone : Option Nat :=
     (Array.range nBones).findSome? (fun i =>
-      if boneParents[i]! < 0 then some (1 + i) else none)
+      if boneParents[i]! < 0 then some i else none)
   let skin : Skin := {
     joints := skinJoints,
     inverseBindMatrices := some ibmAcc,
@@ -332,8 +347,9 @@ def main (args : List String) : IO UInt32 := do
     name := some "Armature"
   }
 
-  -- ## Mesh nodes — each carries one mesh + a skin reference
-  let meshNodeOffset : Nat := 1 + nBones
+  -- ## Mesh nodes — each carries one mesh + a skin reference. Indexed
+  -- starting at `nBones` so the bone Nodes occupy [0, nBones).
+  let meshNodeOffset : Nat := nBones
   let mut meshNodes : Array Node := #[]
   for i in [:nMeshes] do
     meshNodes := meshNodes.push {
@@ -342,19 +358,16 @@ def main (args : List String) : IO UInt32 := do
       skin := some 0
     }
 
-  -- ## Root node — Z-up→Y-up rotation, parents skeleton roots + mesh nodes
+  -- ## Scene roots — skeleton root bone(s) + every mesh node, all at
+  -- the top level. No axis-conversion wrapper Node.
   let skeletonRoots : Array Nat :=
     Array.range nBones |>.foldl (init := #[]) (fun acc i =>
-      if boneParents[i]! < 0 then acc.push (1 + i) else acc)
+      if boneParents[i]! < 0 then acc.push i else acc)
   let meshNodeIndices : Array Nat :=
     Array.range nMeshes |>.map (· + meshNodeOffset)
-  let rootNode : Node := {
-    name := some "Mire",
-    rotation := some #[-0.7071068, 0.0, 0.0, 0.7071068],   -- −90° around X
-    children := skeletonRoots ++ meshNodeIndices
-  }
+  let sceneRoots : Array Nat := skeletonRoots ++ meshNodeIndices
 
-  let allNodes : Array Node := #[rootNode] ++ boneNodes ++ meshNodes
+  let allNodes : Array Node := boneNodes ++ meshNodes
 
   -- ## Document
   let doc : Document := {
@@ -366,7 +379,7 @@ def main (args : List String) : IO UInt32 := do
     skins := #[skin],
     materials := #[{ name := some "default" }],
     nodes := allNodes,
-    scenes := #[{ nodes := #[0], name := some "default" }],
+    scenes := #[{ nodes := sceneRoots, name := some "default" }],
     scene := some 0,
     extensions := #[
       (Top.extensionName, Top.toJson { schema := some curvenetSchema })
