@@ -355,6 +355,106 @@ inline std::vector<double> cg_icc_with_guess(
     return x;
 }
 
+// Block ICC(0)-PCG: solve A·X = B for X, B both n×k row-major,
+// running k preconditioned-CG instances in lockstep. Each iter
+// shares the matrix-vector product `Y = A·P` (one `spmv_multi`)
+// and applies M^{-1} per column via independent backsolves.
+//
+// Saves wall time vs k independent CG calls because:
+//   * SpMV cost amortises - one CSR pass touches A's values
+//     for all k right-hand-sides (cache-friendly, SIMD-amenable).
+//   * Each iter's per-vector work (axpy, dot, jacobi) is k-wide
+//     - faster per element than k separate single-vector calls.
+//
+// Note this is "multi-RHS lockstep CG", not block-CG with
+// inter-column conjugacy. Inter-column conjugacy gets you a
+// further iter-count reduction at the cost of m×m linear solves
+// per iter; not implemented here. Kept simple per Gall's law:
+// promote what already works to wider data, measure, evolve.
+inline std::vector<double> cg_icc_block(
+        const sparse::SparseMatrixCSR &A,
+        const IncompleteCholeskyFactor &fac,
+        const std::vector<double> &B,
+        std::size_t k,
+        std::size_t max_iter,
+        double tol) {
+    const std::size_t n = A.rows;
+    std::vector<double> X(n * k, 0.0);
+    std::vector<double> R = B;                             // r = b - A·0 = b
+    // Apply M^{-1} per column to form Z.
+    auto apply_block = [&](const std::vector<double> &V) {
+        std::vector<double> Z(n * k, 0.0);
+        std::vector<double> col(n);
+        for (std::size_t c = 0; c < k; ++c) {
+            for (std::size_t i = 0; i < n; ++i) col[i] = V[i * k + c];
+            const std::vector<double> z = apply_minv(fac, col);
+            for (std::size_t i = 0; i < n; ++i) Z[i * k + c] = z[i];
+        }
+        return Z;
+    };
+    std::vector<double> Z = apply_block(R);
+    std::vector<double> P = Z;
+    // Per-column rz_old and tol checks.
+    std::vector<double> rz_old(k, 0.0);
+    std::vector<char> done(k, 0);
+    std::size_t live = k;
+    for (std::size_t i = 0; i < n; ++i) {
+        for (std::size_t c = 0; c < k; ++c) rz_old[c] += R[i * k + c] * Z[i * k + c];
+    }
+    const double tol_sq = tol * tol;
+
+    for (std::size_t iter = 0; iter < max_iter; ++iter) {
+        const std::vector<double> AP = sparse::spmv_multi(A, P, k);
+        // Per-column pAp.
+        std::vector<double> pAp(k, 0.0);
+        for (std::size_t i = 0; i < n; ++i) {
+            for (std::size_t c = 0; c < k; ++c) {
+                pAp[c] += P[i * k + c] * AP[i * k + c];
+            }
+        }
+        // Per-column alpha + update X, R.
+        std::vector<double> alpha(k, 0.0);
+        for (std::size_t c = 0; c < k; ++c) {
+            alpha[c] = (pAp[c] == 0.0) ? 0.0 : (rz_old[c] / pAp[c]);
+        }
+        for (std::size_t i = 0; i < n; ++i) {
+            for (std::size_t c = 0; c < k; ++c) {
+                X[i * k + c] += alpha[c] * P[i * k + c];
+                R[i * k + c] -= alpha[c] * AP[i * k + c];
+            }
+        }
+        // Per-column rr check; mark done when below tol.
+        std::vector<double> rr(k, 0.0);
+        for (std::size_t i = 0; i < n; ++i) {
+            for (std::size_t c = 0; c < k; ++c) rr[c] += R[i * k + c] * R[i * k + c];
+        }
+        for (std::size_t c = 0; c < k; ++c) {
+            if (!done[c] && rr[c] < tol_sq) {
+                done[c] = 1;
+                --live;
+            }
+        }
+        if (live == 0) break;
+        // Apply M^{-1}, update beta + P per column.
+        Z = apply_block(R);
+        std::vector<double> rz_new(k, 0.0);
+        for (std::size_t i = 0; i < n; ++i) {
+            for (std::size_t c = 0; c < k; ++c) rz_new[c] += R[i * k + c] * Z[i * k + c];
+        }
+        std::vector<double> beta(k, 0.0);
+        for (std::size_t c = 0; c < k; ++c) {
+            beta[c] = (rz_old[c] == 0.0) ? 0.0 : (rz_new[c] / rz_old[c]);
+        }
+        for (std::size_t i = 0; i < n; ++i) {
+            for (std::size_t c = 0; c < k; ++c) {
+                P[i * k + c] = Z[i * k + c] + beta[c] * P[i * k + c];
+            }
+        }
+        rz_old = rz_new;
+    }
+    return X;
+}
+
 } // namespace incomplete_cholesky
 } // namespace curvenet
 

@@ -156,6 +156,55 @@ int main() {
                   nv, bind_ms);
     std::fflush(stdout); std::printf("cold 12 right-hand-side frame  : %8.0f ms  -> %.2f FPS\n",
                   cold_frame_ms, 1000.0 / cold_frame_ms);
+    // Block-CG-12: 12 *independent* right-hand sides (mimicking the
+    // deformer's actual 9 Fv + 3 Xv column workload, where each
+    // column is a different combination of profile-curve constraints).
+    // Block-CG gets its iter-count reduction only when columns are
+    // linearly independent, so use 12 different sin-phase RHS.
+    std::vector<std::vector<double>> rhs_per_col(k);
+    for (std::size_t c = 0; c < k; ++c) {
+        std::vector<double> y(nv);
+        const double phase = 0.001 + 0.0003 * static_cast<double>(c);
+        for (std::size_t i = 0; i < nv; ++i) {
+            y[i] = std::sin(phase * static_cast<double>(i + 1));
+        }
+        rhs_per_col[c] = sp::spmv(LhsM_csr, y);
+    }
+    std::vector<double> B(nv * k);
+    for (std::size_t c = 0; c < k; ++c) {
+        for (std::size_t i = 0; i < nv; ++i) B[i * k + c] = rhs_per_col[c][i];
+    }
+
+    // 12 single-RHS calls (current production path)
+    const double t_d = now_ms();
+    std::vector<double> X_serial(nv * k);
+    for (std::size_t c = 0; c < k; ++c) {
+        const std::vector<double> x = icc::cg_icc_with_guess(
+            LhsM_csr, fac, rhs_per_col[c], x0_zero, cg_max_iter, tol);
+        for (std::size_t i = 0; i < nv; ++i) X_serial[i * k + c] = x[i];
+    }
+    const double serial_12_ms = now_ms() - t_d;
+
+    // 1 block-CG-12 call
+    const double t_e = now_ms();
+    const std::vector<double> X_block = icc::cg_icc_block(
+        LhsM_csr, fac, B, k, cg_max_iter, tol);
+    const double block_12_ms = now_ms() - t_e;
+
+    // Sanity: block answer matches serial.
+    double max_block_err = 0.0;
+    for (std::size_t i = 0; i < nv * k; ++i) {
+        max_block_err = std::max(max_block_err, std::fabs(X_serial[i] - X_block[i]));
+    }
+
+    std::fflush(stdout); std::printf("\n--- block-CG-12 vs 12 serial single-RHS ---\n");
+    std::fflush(stdout); std::printf("  serial (12 cg_icc_with_guess) : %9.2f ms\n", serial_12_ms);
+    std::fflush(stdout); std::printf("  block  (1 cg_icc_block)       : %9.2f ms  -> %.2fx\n",
+                  block_12_ms, serial_12_ms / block_12_ms);
+    std::fflush(stdout); std::printf("  block vs serial max diff      : %.3e\n", max_block_err);
+    std::fflush(stdout); std::printf("  block frame fps               : %.2f FPS\n",
+                  1000.0 / block_12_ms);
+
     std::fflush(stdout); std::printf("(total bench: %.1f s, cap %.0f s)\n",
                   (now_ms() - t_bench_start) / 1000.0, T_CAP_MS / 1000.0);
     return 0;
