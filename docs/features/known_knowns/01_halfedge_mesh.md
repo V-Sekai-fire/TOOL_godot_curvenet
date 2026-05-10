@@ -13,10 +13,15 @@ shipping default — used by every cut-mesh build at bind time.
 ## Files
 
 ### Lean spec
+- `lean/Curvenet/Vec3.lean` — 1 proof (foundational 3-vector type
+  used by every feature in this directory; deliberately doesn't have
+  its own entry since it's a primitive, not a feature)
 - `lean/Curvenet/Halfedge.lean` — 9 native_decide proofs
 - `lean/Curvenet/HalfedgeBuilder.lean` — 14 native_decide proofs
 
 ### C++ implementation
+- `src/curvenet/vec3.h` — foundational 3-vector type (mirror of
+  `Vec3.lean`); used by every other module in `src/curvenet/`
 - `src/curvenet/halfedge.h` — `Halfedge`, `HalfedgeMesh`,
   `is_manifold` checks
 - `src/curvenet/halfedge_builder.h` — `from_triangles(vertex_count,

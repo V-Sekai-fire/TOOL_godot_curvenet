@@ -34,12 +34,20 @@ surface the tilt reference is world-Y-up not surface-normal — see
 
 ### GDScript / inspector
 
+- `source_path : NodePath` — points at the `MeshInstance3D` (or
+  `CSGShape3D` once todo 13 lands) whose mesh the deformer drives.
 - `profile_curves : Array<Curve3D>` — the curves
 - `knot_widths : Array<PackedFloat32Array>` — per-curve width arrays
   parallel to `point_count`. Defaults to 1.0 when missing.
 - `set_knot_width(curve_id, knot_idx, w)` /
   `get_knot_width(curve_id, knot_idx)` — granular accessors used by
   the gizmo's drag handles
+- `length_tiebreak : float` (range 0..1, default 0.1) — tunes
+  tri-to-quad pairing in the cut-mesh assembly when two valid pairs
+  have equal cot-energy. Invalidates the rest cache on change.
+- `deformation_active : bool` — when true, `apply_deformation` runs
+  on `_ready`; when false, the deformer is a passive container and
+  callers run `apply_deformation` manually.
 - Curve3D's existing per-point `tilt`, `point_in`, `point_out`,
   `point_position` — used directly for tilt + tangent + position
 

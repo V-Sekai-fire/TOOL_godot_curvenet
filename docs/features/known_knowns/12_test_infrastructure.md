@@ -27,7 +27,8 @@ artist-facing. Required-green status enforced by manual verification
 ### Lean
 - `lean/Curvenet/*.lean` — 23 modules
 - `lean/Curvenet.lean` — umbrella import
-- `lean/lakefile.lean` — build target
+- `lean/lakefile.toml` — build target (Lean 4's TOML manifest format)
+- `lean/lake-manifest.json` — pinned dependencies
 
 ### C++ tests
 - `tests/test_*.cpp` — 13 RC binaries

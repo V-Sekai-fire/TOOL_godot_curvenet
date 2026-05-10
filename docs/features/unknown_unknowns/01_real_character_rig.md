@@ -2,12 +2,18 @@
 
 ## What we don't know
 
-The deformer has been benchmarked against a single mesh family (Mire
-body at 5k / 81k vertices) with synthetic profile curves authored to
-exercise the algorithm. It has **never been run on an artist-authored
-production character rig** with the deformer driving the actual
-character pose. We don't know what breaks when the input is not
-synthesized.
+The deformer has been benchmarked against the **Mire body** rig
+([V-Sekai-fire/mesh-mille-mire-feuille](https://github.com/V-Sekai-fire/mesh-mille-mire-feuille))
+at 5 k and 81 k vertices — a real production rig, not a synthetic
+fixture. What's still untested:
+
+- Real *artist-authored* profile curves (we've only used hand-crafted
+  curves to exercise the algorithm; no artist has driven Mire
+  end-to-end through the deformer yet).
+- More than one rig — Mire is one production rig family; we don't
+  know how the assumptions baked into its topology generalise.
+- Integration with Mire's other deformation layers (LBS bones,
+  blend shapes, etc.) when the curvenet deformer is layered on top.
 
 ## What might break
 
@@ -28,15 +34,17 @@ synthesized.
 
 ## How we'd find out
 
-- Pick one open-source character rig (e.g. V-Sekai's avatar set, or a
-  Mixamo character). Wire it into a test scene with hand-authored
-  profile curves at typical joints (shoulder, hip, knee, elbow).
+- Hand Mire to an artist with no algorithmic context. Have them
+  author profile curves at typical joints (shoulder, hip, knee,
+  elbow). Watch what they expect vs what the deformer delivers.
+- Add a second rig (V-Sekai's avatar set, a Mixamo character, etc.)
+  to compare what's Mire-specific vs what generalises.
 - Drag a curve. Observe deformation quality. Compare side-by-side
   against the same character with traditional LBS skinning.
 - Capture failure modes: NaN positions, exploding deformations,
   silent divergence, memory blowup, FPS drop.
-- Repeat for at least 3 different characters. Patterns that recur
-  across rigs are real.
+- Repeat for at least 3 different rigs. Patterns that recur across
+  rigs are real production failure modes.
 
 ## Mitigation if it breaks
 
