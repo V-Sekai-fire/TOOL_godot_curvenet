@@ -10,6 +10,7 @@
 #include "curvenet/halfedge.h"
 #include "curvenet/halfedge_builder.h"
 #include "curvenet/harmonic_solve.h"
+#include "curvenet/scaled_frames.h"
 #include "curvenet/sparse_linalg.h"
 #include "curvenet/surface_projection.h"
 #include "curvenet/vec3.h"
@@ -86,6 +87,7 @@ void CurveNetDeformer3D::invalidate_cache() {
 	rest_cache.source_hash = 0;
 	rest_cache.ddm_influences.clear();
 	rest_cache.ddm_built = false;
+	rest_cache.rest_curve_knots.clear();
 }
 
 void CurveNetDeformer3D::set_source_path(const NodePath &p_path) {
@@ -322,6 +324,25 @@ void CurveNetDeformer3D::apply_deformation() {
 			curvenet::cut_mesh_laplacian::assemble_vt_lh_v_csr_robust(
 				rest_cache.cut_mesh, rest_cache.positions, mollify_delta);
 
+		// Bake rest curve knot positions for the runtime deformation
+		// gradient computation. The artist's CURRENT Curve3D state at
+		// bind time is the rest pose; subsequent drags treat it as posed.
+		rest_cache.rest_curve_knots.clear();
+		rest_cache.rest_curve_knots.reserve(profile_curves.size());
+		for (int i = 0; i < profile_curves.size(); ++i) {
+			Ref<Curve3D> c = profile_curves[i];
+			std::vector<curvenet::Vec3> rk;
+			if (c.is_valid()) {
+				const int n = c->get_point_count();
+				rk.reserve(n);
+				for (int j = 0; j < n; ++j) {
+					Vector3 p = c->get_point_position(j);
+					rk.push_back({ p.x, p.y, p.z });
+				}
+			}
+			rest_cache.rest_curve_knots.push_back(std::move(rk));
+		}
+
 		rest_cache.source_hash = hash_val;
 		rest_cache.valid = true;
 	}
@@ -483,18 +504,65 @@ void CurveNetDeformer3D::apply_deformation() {
 	};
 
 	// DDM runtime branch: skip the §6 solve, do a sparse LBS matvec per vertex
-	// using the bind-time-harvested weights. Translation-only handle transforms
-	// for the v0 minimum (per-handle T_h = translation from rest to current).
+	// using the bind-time-harvested weights. Per-handle 4x4 transforms are
+	// built from DeGoes22 §3 isolated-segment deformation gradients — captures
+	// rotation + length scale, not just translation.
 	if (use_direct_delta_mush && rest_cache.ddm_built) {
 		std::vector<curvenet::direct_delta_mush::Mat4> transforms;
 		transforms.reserve(static_cast<std::size_t>(nc));
 		for (int c = 0; c < nc; ++c) {
 			const auto &rest_p = rest_cache.col_rest_pos[c];
-			const double tx = Xc[c * 3 + 0] - rest_p.x;
-			const double ty = Xc[c * 3 + 1] - rest_p.y;
-			const double tz = Xc[c * 3 + 2] - rest_p.z;
-			transforms.push_back(
-				curvenet::direct_delta_mush::mat4_translation(tx, ty, tz));
+			Vector3 posed_p_v(static_cast<float>(Xc[c * 3 + 0]),
+			                    static_cast<float>(Xc[c * 3 + 1]),
+			                    static_cast<float>(Xc[c * 3 + 2]));
+			const curvenet::Vec3 posed_p{ posed_p_v.x, posed_p_v.y, posed_p_v.z };
+
+			// Default to identity rotation if we can't bracket a segment
+			// (single-point curves or out-of-bounds knot indices).
+			curvenet::scaled_frames::Mat3 F = curvenet::scaled_frames::mat3_identity();
+			const auto &handle = rest_cache.col_input_handle[c];
+			const int curve_id = handle.first;
+			const int knot_idx = handle.second;
+			if (curve_id >= 0 && curve_id < static_cast<int>(rest_cache.rest_curve_knots.size())
+			    && knot_idx >= 0
+			    && curve_id < profile_curves.size()) {
+				const auto &rest_knots = rest_cache.rest_curve_knots[curve_id];
+				Ref<Curve3D> curve = profile_curves[curve_id];
+				if (curve.is_valid() && static_cast<std::size_t>(knot_idx) < rest_knots.size()
+				    && knot_idx < curve->get_point_count()) {
+					// Pick a "directional partner" knot — outgoing if not last,
+					// else incoming.
+					int partner_idx = -1;
+					if (knot_idx + 1 < static_cast<int>(rest_knots.size())
+					    && knot_idx + 1 < curve->get_point_count()) {
+						partner_idx = knot_idx + 1;
+					} else if (knot_idx - 1 >= 0) {
+						partner_idx = knot_idx - 1;
+					}
+					if (partner_idx >= 0) {
+						const curvenet::Vec3 rest_q = rest_knots[partner_idx];
+						Vector3 pq_v = curve->get_point_position(partner_idx);
+						const curvenet::Vec3 posed_q{ pq_v.x, pq_v.y, pq_v.z };
+						F = curvenet::scaled_frames::isolated_segment_gradient(
+							rest_p, rest_q, posed_p, posed_q);
+					}
+				}
+			}
+
+			// T_h(x) = F · (x - rest_p) + posed_p
+			//        = F · x + (posed_p - F · rest_p)
+			const curvenet::Vec3 F_rest =
+				curvenet::scaled_frames::mat3_mul_vec(F, rest_p);
+			const double tx = posed_p.x - F_rest.x;
+			const double ty = posed_p.y - F_rest.y;
+			const double tz = posed_p.z - F_rest.z;
+			curvenet::direct_delta_mush::Mat4 T = {
+				F[0], F[1], F[2], tx,
+				F[3], F[4], F[5], ty,
+				F[6], F[7], F[8], tz,
+				0.0,  0.0,  0.0,  1.0
+			};
+			transforms.push_back(T);
 		}
 		PackedVector3Array deformed_vertices;
 		deformed_vertices.resize(static_cast<int>(nv));

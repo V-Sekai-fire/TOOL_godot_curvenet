@@ -101,6 +101,13 @@ class CurveNetDeformer3D : public MeshInstance3D {
 		// `ddm_influences[v]` is the sparse weight row for vertex v.
 		std::vector<std::vector<std::pair<int, double>>> ddm_influences;
 		bool                                  ddm_built = false;
+
+		// Rest-pose knot positions per curve. Baked once at the bind step
+		// (alongside the cut-mesh) so that subsequent drags can compute
+		// per-handle deformation gradients via DeGoes22 §3 scaled-frame
+		// ratios — `(BS)·(B̆S̆)⁻¹` — without re-binding. Indexed by
+		// (curve_id, knot_idx).
+		std::vector<std::vector<curvenet::Vec3>> rest_curve_knots;
 	};
 	mutable RestCache rest_cache;
 
