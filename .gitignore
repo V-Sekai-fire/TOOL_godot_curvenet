@@ -1,21 +1,3 @@
-# Godot 4+ specific ignores
-.godot/
-
-# Ignore library files but not the gdextension file
-demo/bin/*
-!demo/bin/android
-demo/bin/android/*
-!demo/bin/android/.gitkeep
-!demo/bin/linux
-demo/bin/linux/*
-!demo/bin/linux/.gitkeep
-!demo/bin/macos
-demo/bin/macos/*
-!demo/bin/macos/.gitkeep
-!demo/bin/windows
-demo/bin/windows/*
-!demo/bin/windows/.gitkeep
-!demo/bin/*.gdextension
 .sconsign*.dblite
 
 # Ignore custom.py
@@ -52,20 +34,10 @@ compile_commands.json
 !.vscode/extensions.json
 .DS_Store
 
-bin/*
-!bin/android
-bin/android/*
-!bin/android/.gitkeep
-!bin/linux
-bin/linux/*
-!bin/linux/.gitkeep
-!bin/macos
-bin/macos/*
-!bin/macos/.gitkeep
-!bin/windows
-bin/windows/*
-!bin/windows/.gitkeep
-!bin/*.gdextension
+# bin/ holds checked-in helper scripts (slangc shim, future tools).
+# bin/.slang/ is the upstream Slang shader-compiler toolchain (~200MB,
+# fetched by misc/install-slang.sh) — gitignored.
+bin/.slang/
 
 # Compiled test binaries and macOS debug symbol bundles
 tests/bin/*
@@ -82,14 +54,11 @@ tests/bin/*
 src/gen/
 .obsidian/
 
-# Character mesh assets — externally sourced (V-Sekai-fire/mesh-mille-
-# mire-feuille), too large to track in-tree. The bench reads pre-baked
-# vertex data from tests/mire_body_data.h instead, so the .blend / .glb
-# only need to be present locally when re-baking.
-demo/character/*.blend
-demo/character/*.glb
-
 # 6.4 MB header from `Body` subdivided 2x for the 70k-vert
 # benchmark. Regenerated via `make -C tests bench_70k_data` (or by
 # hand via Blender MCP). Doesn't belong in git.
 tests/mire_body_70k_data.h
+
+# Lake fetched dependencies + build cache.
+lean/.lake/
+lean/lake-packages/

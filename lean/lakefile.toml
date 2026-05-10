@@ -4,10 +4,14 @@ defaultTargets = ["Curvenet", "LeanGltf"]
 [[require]]
 name = "LeanSlang"
 git = "https://github.com/V-Sekai-fire/lean-slang.git"
-rev = "v0.0.4"
+rev = "v0.0.5"
 
 [[lean_lib]]
 name = "Curvenet"
 
 [[lean_lib]]
 name = "LeanGltf"
+
+[[lean_exe]]
+name = "emit_shaders"
+root = "EmitShaders"
