@@ -325,6 +325,26 @@ start from one frame's actual deformer output to the next.
 
 Reproducer: `make -C tests bench_5k_icc`.
 
+### HSC + shared-nothing parallelism (max_degree=24 tuning)
+
+Profiled per-level V-cycle cost via `tests/diag_hsc_profile_5k`:
+deeper levels have higher per-row work despite smaller n,
+because `max_degree`-bounded coarse matrices have rows that don't
+fit L1 cache. At level 0 (n=5485) smooth = 4 µs; at level 38
+(n=67) smooth = 236 µs — 60× slower per row.
+
+Tuning `max_degree` from 32 to 24:
+  V-cycle apply at 5k: 3.97 ms → **2.98 ms** (25% faster)
+  Per-RHS solve at 5k: 31 ms / 8 iters → **28 ms / 9 iters**
+  Parallel 12-RHS at 5k (12 cores): 73 ms → **46 ms** (8.04×)
+  Per-RHS solve at 81k: 2.31 s / 27 iters → 2.30 s / 27 iters
+                                              (no change)
+
+5k parallel 12-RHS at **46 ms** is the standout — within ~9× of the
+5 ms PCVR target on M2 Pro. At 81k+ the impossibility analysis
+holds: V-cycle apply (85 ms / iter) × 27 iters means even perfect
+parallelism leaves ~190 ms / 12-RHS frame, ~38× over budget.
+
 ### HSC + shared-nothing parallelism
 
 `cg_hsc_with_guess` takes only const-references and produces a

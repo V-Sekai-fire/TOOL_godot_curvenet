@@ -515,7 +515,7 @@ inline Hierarchy build_hierarchy(const Graph &fine,
                                      std::size_t coarsest_size = 64,
                                      std::size_t max_levels = 64,
                                      double sparsify_tau = 0.0,
-                                     std::size_t max_degree = 32,
+                                     std::size_t max_degree = 24,
                                      bool verbose = false) {
     Hierarchy h;
     h.graphs.push_back(fine);
@@ -620,37 +620,60 @@ inline void sym_gauss_seidel_smooth(const sparse::SparseMatrixCSR &A,
 //   pre-smooth -> restrict residual -> recurse -> prolong -> post-smooth
 // At the coarsest level uses sparse::cg as a direct-equivalent
 // (small system, converges quickly).
+// Per-level timing accumulators for profiling. When non-null,
+// times in microseconds get added per level on the way up.
+struct VCycleProfile {
+    std::vector<double> smooth_us;
+    std::vector<double> spmv_us;
+    std::vector<double> restrict_us;
+    std::vector<double> prolong_us;
+    std::vector<double> bottom_us;
+};
+
 inline std::vector<double> v_cycle_apply(const Hierarchy &h,
                                               const std::vector<double> &b,
                                               std::size_t level = 0,
                                               std::size_t pre_smooth = 1,
-                                              std::size_t post_smooth = 1) {
+                                              std::size_t post_smooth = 1,
+                                              VCycleProfile *prof = nullptr) {
+    using clk = std::chrono::steady_clock;
+    auto us = [](const auto &a, const auto &b) {
+        return static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(b - a).count());
+    };
+
     const std::size_t L = h.graphs.size();
     if (level + 1 == L) {
-        // Coarsest level: cap CG iters to keep V-cycle apply
-        // bounded. Going to high tol with diag-Jacobi PCG on a
-        // few-thousand-row coarse matrix is hundreds of iters
-        // and dominates the V-cycle cost. The outer PCG corrects
-        // any leftover bottom-level error, so an approximate
-        // bottom solve (30 iters) is fine.
-        return sparse::cg(h.mats[level], b, 30, 1e-6);
+        const auto t0 = clk::now();
+        std::vector<double> x = sparse::cg(h.mats[level], b, 30, 1e-6);
+        if (prof) prof->bottom_us.push_back(us(t0, clk::now()));
+        return x;
     }
     const sparse::SparseMatrixCSR &A = h.mats[level];
     const std::vector<double> &diag = h.diags[level];
     std::vector<double> x(b.size(), 0.0);
-    // SGS smoother per cycle 1: stronger contraction per sweep
-    // than damped Jacobi. nu=1 SGS ≈ 2-3 Jacobi sweeps of
-    // equivalent error reduction.
+    auto t0 = clk::now();
     sym_gauss_seidel_smooth(A, diag, b, x, pre_smooth);
+    auto t1 = clk::now();
     const std::vector<double> Ax = sparse::spmv(A, x);
     std::vector<double> r(b.size());
     for (std::size_t i = 0; i < b.size(); ++i) r[i] = b[i] - Ax[i];
+    auto t2 = clk::now();
     const std::vector<double> rc = restrict_pt(h.prolongs[level], r);
+    auto t3 = clk::now();
     const std::vector<double> ec = v_cycle_apply(h, rc, level + 1,
-                                                       pre_smooth, post_smooth);
+                                                       pre_smooth, post_smooth, prof);
+    auto t4 = clk::now();
     const std::vector<double> e = prolong(h.prolongs[level], ec);
     for (std::size_t i = 0; i < b.size(); ++i) x[i] += e[i];
+    auto t5 = clk::now();
     sym_gauss_seidel_smooth(A, diag, b, x, post_smooth);
+    auto t6 = clk::now();
+    if (prof) {
+        prof->smooth_us.push_back(us(t0, t1) + us(t5, t6));
+        prof->spmv_us.push_back(us(t1, t2));
+        prof->restrict_us.push_back(us(t2, t3));
+        prof->prolong_us.push_back(us(t4, t5));
+    }
     return x;
 }
 
