@@ -1,65 +1,29 @@
-.sconsign*.dblite
-
-# Ignore custom.py
-custom.py
-
-# Ignore generated compile_commands.json
-compile_commands.json
-
-# Binaries
-*.o
-*.os
-*.so
-*.obj
-!demo/**/*.obj
-*.bc
-*.pyc
-*.dblite
-*.pdb
-*.lib
-*.config
-*.creator
-*.creator.user
-*.files
-*.includes
-*.idb
-*.exp
-*.d
-
-# Other stuff
-*.log
-
-# VSCode
+# Editor + tooling
+.DS_Store
 .vscode/*
 !.vscode/extensions.json
-.DS_Store
-
-# bin/ holds checked-in helper scripts (slangc shim, future tools).
-# bin/.slang/ is the upstream Slang shader-compiler toolchain (~200MB,
-# fetched by misc/install-slang.sh) — gitignored.
-bin/.slang/
-
-# Compiled test binaries and macOS debug symbol bundles
-tests/bin/*
-!tests/bin/.gitkeep
-*.dSYM/
-
-# Compiled shaders — produced by glslangValidator at test/build time.
-# The .comp source under src/curvenet/shaders/ is tracked; the .spv
-# output is regenerated and stays out of the tree. (Godot will compile
-# and cache its own SPIR-V at runtime when these shaders move into
-# the RenderingDevice path; that cache lives under .godot/.)
-*.spv
-
-src/gen/
 .obsidian/
 
-# 6.4 MB header from `Body` subdivided 2x for the 70k-vert
-# benchmark. Regenerated via `make -C tests bench_70k_data` (or by
-# hand via Blender MCP). Doesn't belong in git.
-tests/mire_body_70k_data.h
-
-# Lake fetched dependencies + build cache.
+# Lake build cache + fetched dependencies
 lean/.lake/
 lean/lake-packages/
+
+# Slang toolchain (~200MB, fetched by misc/install-slang.sh)
+bin/.slang/
+
+# slang_validate harness build dir (slangc-cpp + clang artifacts)
 tests/slang_validate/build/
+
+# Compiled SPIR-V output (regenerable from .slang via slangc)
+*.spv
+
+# Generic compile artifacts
+*.o
+*.os
+*.bc
+*.pdb
+*.dblite
+*.dSYM/
+*.log
+*.pyc
+compile_commands.json
