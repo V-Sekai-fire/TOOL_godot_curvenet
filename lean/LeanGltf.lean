@@ -3,6 +3,7 @@ import LeanGltf.Types
 import LeanGltf.Document
 import LeanGltf.GLB
 import LeanGltf.Writer
+import LeanGltf.Extensions.EXTStructuralMetadata
 
 /-!
 # `LeanGltf` — umbrella import
