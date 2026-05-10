@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 import os
 
+from build_slang import slang
+
 
 def normalize_path(val, env):
     return val if os.path.isabs(val) else os.path.join(env.Dir("#").abspath, val)
@@ -33,6 +35,15 @@ opts.Add(
         help="Path to a custom `compile_commands.json` file",
         default=localEnv.get("compiledb_file", "compile_commands.json"),
         validator=validate_parent_dir,
+    )
+)
+opts.Add(
+    BoolVariable(
+        key="build_slang",
+        help="Build the vendored Slang shader compiler at thirdparty/slang/ "
+             "and link the GDExtension against libslang-compiler. "
+             "Adds 5-15 minutes to a cold build; cached after that.",
+        default=False,
     )
 )
 opts.Update(localEnv)
@@ -99,7 +110,20 @@ copy = env.InstallAs(
     "{}/bin/{}/{}lib{}".format(projectdir, env["platform"], filepath, file), library
 )
 
+# Slang integration. Off by default; opt in with `scons build_slang=true` once
+# the deformer's runtime DDM matvec is wired to dispatch a Slang-compiled
+# compute shader instead of the CPU lbs_matvec path. The pattern follows
+# DevPrice/godot-slang: drop libslang-compiler.{so,dylib,dll} into
+# `<projectdir>/bin/<platform>/` next to the GDExtension binary.
+slang_install = None
+if localEnv.get("build_slang", False):
+    slang_output_dir = "{}/bin/{}/".format(projectdir, env["platform"])
+    slang_install = slang(env, slang_output_dir)
+    env.Depends(library, slang_install)
+
 default_args = [library, copy]
+if slang_install is not None:
+    default_args.append(slang_install)
 if localEnv.get("compiledb", False):
     default_args += [compilation_db]
 Default(*default_args)
