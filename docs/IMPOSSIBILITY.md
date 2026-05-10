@@ -1,12 +1,30 @@
 # Why iterative methods cannot reach the 5 ms target
 
+> **Scope clarification (post-100-loops).** This document analyzes
+> **iterative-runtime** architectures: methods that solve the
+> harmonic system from scratch every frame. The result below
+> stands for that regime.
+>
+> **Precompute-runtime** architectures (Direct Delta Mush,
+> Skinning Eigenmodes, SSDR) escape the per-frame iteration budget
+> by paying once at bind time and reducing runtime to a sparse
+> matvec. The chosen production path is **DDM curvenet-adapted**
+> (see `PERF_BASELINE.md` "Current architecture") which targets
+> sub-ms on Quest 3 by trading a one-shot ~100–300 ms re-bind on
+> topology changes for `pos[v] = sum_i W[v,i] · F_i · rest_pos[v]`
+> at runtime. The impossibility result below does **not** apply to
+> that architecture; it documents why we stopped iterating on
+> iterative methods and pivoted to precompute.
+
 Result: at our code budget (~500 LOC of new in-house C++ for the
 solver layer), no iterative method can solve the 12-RHS Mire 5k
 cot-Laplacian frame within 5 ms. This is a tighter "practical
 impossibility" — not a fundamental one, since Spielman-Teng-style
 nearly-linear-time Laplacian solvers exist in theory; but their
 implementations exceed our LOC budget. Direct sparse Cholesky is
-the only path remaining at our budget.
+the only path remaining at our budget for iterative-runtime
+architectures (and even Cholesky doesn't hit 0.8 ms on Quest 3
+at 50k, which is what forced the pivot to DDM).
 
 ## 1. The per-frame iteration budget
 

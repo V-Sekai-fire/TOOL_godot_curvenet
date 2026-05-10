@@ -1,3 +1,11 @@
+// TOMBSTONE [post-100-loops cleanup, 2026-05-09]
+// Two-level Schwarz: 193 iters at 5k (slower than Chebyshev's 137,
+// slower than ICC's ~350 with much higher per-iter cost), and the
+// 81k port stalled at residual 3.7. Multilevel and HEM extensions
+// also retired. Architecture pivoted to DDM at runtime; this
+// bench measures a retired path. See PERF_BASELINE.md
+// "Trajectory" + IMPOSSIBILITY.md.
+//
 // Copyright (c) 2026 K. S. Ernest (iFire) Lee.
 // SPDX-License-Identifier: MIT
 //

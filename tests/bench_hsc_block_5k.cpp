@@ -1,3 +1,12 @@
+// TOMBSTONE [post-100-loops cleanup, 2026-05-09]
+// Block V-cycle was net-negative at 5k (1-thread block 135 ms vs
+// 12-thread shared-nothing 42 ms — at 5k working set fits cache so
+// memory-amortisation across RHS doesn't help, while doing 12x
+// arithmetic in 1 thread costs more). Bench preserved for trajectory
+// record; see PERF_BASELINE.md "Trajectory" section. Do not regress
+// to this measurement as a baseline. Architecture is now DDM at
+// runtime + HSC at bind time; this bench measures a retired path.
+//
 // Block (multi-RHS) HSC at 5k. Compares:
 //  - 12 sequential single-RHS solves
 //  - 12-thread shared-nothing (one solve per thread)

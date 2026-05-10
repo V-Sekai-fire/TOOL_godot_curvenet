@@ -1,5 +1,33 @@
 # DeGoes22 deformer — CPU baseline
 
+## Current architecture (post-100-loops)
+
+After ~100 loops of solver experimentation the deformer pipeline has
+settled on a **bind / runtime split**:
+
+| layer | algorithm | when | cost |
+|---|---|---|---|
+| **Bind** (knot/tangent topology change) | HSC harmonic response capture + Laplacian smoothing + top-K sparsification | One-shot per character load + on curvenet topology edits in editor | ~100–300 ms at 50k |
+| **Runtime** (knot/tangent position drag) | Direct Delta Mush curvenet-adapted: `pos[v] = sum_i W[v,i] · F_i · rest_pos[v]` per vertex | Every frame | sub-ms target on Quest 3, ~0.5 ms at 50k estimated |
+
+Lean specs: `lean/Curvenet/DirectDeltaMush.lean` (runtime kernel,
+6 native_decide proofs) and `lean/Curvenet/DirectDeltaMushBind.lean`
+(bind-time post-processing — smoothing + sparsification, 8 native_decide
+proofs). C++ implementation pending.
+
+The HSC pipeline (loops 8 → 100/16) remains in tree as the **bind-time**
+solver providing the harmonic response that DDM bakes. Iterative HSC at
+runtime stays as opt-in for desktop where bind-time precompute is
+undesirable; ICC opt-in via `use_incomplete_cholesky` flag in
+`CurveNetDeformer3D` continues to work.
+
+The trajectory of all attempted runtime solver paths (multilevel Schwarz,
+HEM aggregation, kernel projection, Chebyshev acceleration, block V-cycle,
+multi-color SGS, ...) is preserved in the per-loop sections below — each
+retired path documented with a verdict and the measurement that retired it.
+
+## Trajectory: per-loop measurements
+
 Wall-clock numbers for `src/curvenet_deformer_3d.cpp::apply_deformation`
 on CPU. Run via:
 

@@ -1,3 +1,12 @@
+// TOMBSTONE [post-100-loops cleanup, 2026-05-09]
+// Chebyshev-wrapped per-meshlet Schwarz: 137 outer iters at 5k
+// (best 5k iter count among iterative methods) but no rho in
+// {0.997 ... 0.99997} converged at 81k in 800 iters. Same root
+// cause as every other 81k iterative attempt: 7-decade diagonal
+// spread breaks the underlying smoother. Architecture pivoted to
+// DDM at runtime; this bench measures a retired path. See
+// PERF_BASELINE.md "Trajectory" + IMPOSSIBILITY.md.
+//
 // Copyright (c) 2026 K. S. Ernest (iFire) Lee.
 // SPDX-License-Identifier: MIT
 //

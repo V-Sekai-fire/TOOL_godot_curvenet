@@ -1,3 +1,12 @@
+// TOMBSTONE [post-100-loops cleanup, 2026-05-09]
+// 12-RHS shared-nothing parallel HSC at 81k landed at 86 s wall
+// time — slower than 12 sequential ICC solves (~42 s) because at
+// 81k each of 12 threads touching ~40 MB of hierarchy data spills
+// M2 Pro's 24 MB L3. The architectural pivot is to DDM at runtime
+// (sub-ms regardless of mesh size) with HSC kept at bind time
+// only. Bench preserved for trajectory record; see PERF_BASELINE.md
+// "Trajectory" section. Do not regress to this measurement.
+//
 // Copyright (c) 2026 K. S. Ernest (iFire) Lee.
 // SPDX-License-Identifier: MIT
 //
