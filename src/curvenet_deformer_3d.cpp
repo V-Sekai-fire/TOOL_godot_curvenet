@@ -43,6 +43,10 @@ void CurveNetDeformer3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "knot_widths", PROPERTY_HINT_ARRAY_TYPE,
 							  String::num_int64(Variant::PACKED_FLOAT32_ARRAY)),
 			"set_knot_widths", "get_knot_widths");
+	ClassDB::bind_method(D_METHOD("set_knot_width", "curve_id", "knot_idx", "w"),
+		&CurveNetDeformer3D::set_knot_width);
+	ClassDB::bind_method(D_METHOD("get_knot_width", "curve_id", "knot_idx"),
+		&CurveNetDeformer3D::get_knot_width);
 
 	ClassDB::bind_method(D_METHOD("set_length_tiebreak", "v"), &CurveNetDeformer3D::set_length_tiebreak);
 	ClassDB::bind_method(D_METHOD("get_length_tiebreak"), &CurveNetDeformer3D::get_length_tiebreak);
@@ -122,6 +126,26 @@ void CurveNetDeformer3D::set_knot_widths(const TypedArray<PackedFloat32Array> &p
 
 TypedArray<PackedFloat32Array> CurveNetDeformer3D::get_knot_widths() const {
 	return knot_widths;
+}
+
+void CurveNetDeformer3D::set_knot_width(int p_curve_id, int p_knot_idx, double p_w) {
+	if (p_curve_id < 0 || p_knot_idx < 0) return;
+	while (knot_widths.size() <= p_curve_id) {
+		knot_widths.push_back(PackedFloat32Array{});
+	}
+	PackedFloat32Array row = knot_widths[p_curve_id];
+	while (row.size() <= p_knot_idx) {
+		row.push_back(1.0f);
+	}
+	row.set(p_knot_idx, static_cast<float>(p_w));
+	knot_widths[p_curve_id] = row;
+}
+
+double CurveNetDeformer3D::get_knot_width(int p_curve_id, int p_knot_idx) const {
+	if (p_curve_id < 0 || p_curve_id >= knot_widths.size()) return 1.0;
+	PackedFloat32Array row = knot_widths[p_curve_id];
+	if (p_knot_idx < 0 || p_knot_idx >= row.size()) return 1.0;
+	return static_cast<double>(row[p_knot_idx]);
 }
 
 TypedArray<Curve3D> CurveNetDeformer3D::get_profile_curves() const {

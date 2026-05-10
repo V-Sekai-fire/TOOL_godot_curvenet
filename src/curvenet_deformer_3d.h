@@ -146,6 +146,11 @@ public:
 	void set_knot_widths(const TypedArray<PackedFloat32Array> &p_widths);
 	TypedArray<PackedFloat32Array> get_knot_widths() const;
 
+	// Granular per-knot accessors for the gizmo's drag handles. Auto-extend
+	// the underlying array; default value 1.0 when missing.
+	void  set_knot_width(int p_curve_id, int p_knot_idx, double p_w);
+	double get_knot_width(int p_curve_id, int p_knot_idx) const;
+
 	void set_length_tiebreak(double p_v);
 	double get_length_tiebreak() const;
 
