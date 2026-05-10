@@ -88,6 +88,7 @@ void CurveNetDeformer3D::invalidate_cache() {
 	rest_cache.ddm_influences.clear();
 	rest_cache.ddm_built = false;
 	rest_cache.rest_curve_knots.clear();
+	rest_cache.rest_curve_tilts.clear();
 }
 
 void CurveNetDeformer3D::set_source_path(const NodePath &p_path) {
@@ -324,23 +325,29 @@ void CurveNetDeformer3D::apply_deformation() {
 			curvenet::cut_mesh_laplacian::assemble_vt_lh_v_csr_robust(
 				rest_cache.cut_mesh, rest_cache.positions, mollify_delta);
 
-		// Bake rest curve knot positions for the runtime deformation
+		// Bake rest curve knot positions + tilts for the runtime deformation
 		// gradient computation. The artist's CURRENT Curve3D state at
 		// bind time is the rest pose; subsequent drags treat it as posed.
 		rest_cache.rest_curve_knots.clear();
+		rest_cache.rest_curve_tilts.clear();
 		rest_cache.rest_curve_knots.reserve(profile_curves.size());
+		rest_cache.rest_curve_tilts.reserve(profile_curves.size());
 		for (int i = 0; i < profile_curves.size(); ++i) {
 			Ref<Curve3D> c = profile_curves[i];
 			std::vector<curvenet::Vec3> rk;
+			std::vector<double>         rt;
 			if (c.is_valid()) {
 				const int n = c->get_point_count();
 				rk.reserve(n);
+				rt.reserve(n);
 				for (int j = 0; j < n; ++j) {
 					Vector3 p = c->get_point_position(j);
 					rk.push_back({ p.x, p.y, p.z });
+					rt.push_back(static_cast<double>(c->get_point_tilt(j)));
 				}
 			}
 			rest_cache.rest_curve_knots.push_back(std::move(rk));
+			rest_cache.rest_curve_tilts.push_back(std::move(rt));
 		}
 
 		rest_cache.source_hash = hash_val;
@@ -545,6 +552,47 @@ void CurveNetDeformer3D::apply_deformation() {
 						const curvenet::Vec3 posed_q{ pq_v.x, pq_v.y, pq_v.z };
 						F = curvenet::scaled_frames::isolated_segment_gradient(
 							rest_p, rest_q, posed_p, posed_q);
+					}
+
+					// DeGoes22 §3 tilt: rotation around the posed tangent by
+					// (posed_tilt - rest_tilt). Captures artist's twist of the
+					// local frame at this knot. Composed BEFORE the tangent
+					// rotation so the final F is R_tilt · F_segment.
+					const auto &rest_tilts = rest_cache.rest_curve_tilts[curve_id];
+					if (static_cast<std::size_t>(knot_idx) < rest_tilts.size()) {
+						const double rest_tilt  = rest_tilts[knot_idx];
+						const double posed_tilt = static_cast<double>(curve->get_point_tilt(knot_idx));
+						const double dtilt = posed_tilt - rest_tilt;
+						if (std::fabs(dtilt) > 1e-9) {
+							const double dx = posed_p.x - rest_p.x;  // posed-tangent fallback
+							curvenet::Vec3 axis{ dx, 0.0, 0.0 };
+							// Use the actual posed tangent if we have a partner.
+							if (knot_idx + 1 < curve->get_point_count()) {
+								Vector3 q = curve->get_point_position(knot_idx + 1);
+								axis = { q.x - posed_p.x, q.y - posed_p.y, q.z - posed_p.z };
+							} else if (knot_idx - 1 >= 0) {
+								Vector3 q = curve->get_point_position(knot_idx - 1);
+								axis = { posed_p.x - q.x, posed_p.y - q.y, posed_p.z - q.z };
+							}
+							const double an = std::sqrt(axis.x * axis.x + axis.y * axis.y + axis.z * axis.z);
+							if (an > 1e-12) {
+								axis = { axis.x / an, axis.y / an, axis.z / an };
+								const double s = std::sin(dtilt);
+								const double cc = std::cos(dtilt);
+								const curvenet::scaled_frames::Mat3 K =
+									curvenet::scaled_frames::skew(axis);
+								const curvenet::scaled_frames::Mat3 K2 =
+									curvenet::scaled_frames::mat3_mul(K, K);
+								// Rodrigues: R = I + sin(θ)·K + (1 - cos(θ))·K²
+								curvenet::scaled_frames::Mat3 R_tilt =
+									curvenet::scaled_frames::mat3_add(
+										curvenet::scaled_frames::mat3_identity(),
+										curvenet::scaled_frames::mat3_add(
+											curvenet::scaled_frames::mat3_smul(s, K),
+											curvenet::scaled_frames::mat3_smul(1.0 - cc, K2)));
+								F = curvenet::scaled_frames::mat3_mul(R_tilt, F);
+							}
+						}
 					}
 				}
 			}

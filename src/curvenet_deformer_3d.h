@@ -108,6 +108,13 @@ class CurveNetDeformer3D : public MeshInstance3D {
 		// ratios — `(BS)·(B̆S̆)⁻¹` — without re-binding. Indexed by
 		// (curve_id, knot_idx).
 		std::vector<std::vector<curvenet::Vec3>> rest_curve_knots;
+
+		// Rest-pose per-knot tilt (radians around tangent). DeGoes22 §3's
+		// tilt control — rotates the local frame's normal/binormal axes
+		// without changing the tangent. Baked from Curve3D::get_point_tilt
+		// at bind time; Δtilt = posed - rest is composed into F_h at
+		// runtime as a rotation around the posed tangent.
+		std::vector<std::vector<double>>          rest_curve_tilts;
 	};
 	mutable RestCache rest_cache;
 
