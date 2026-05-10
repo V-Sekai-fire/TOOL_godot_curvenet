@@ -36,3 +36,4 @@ import Curvenet.HeavyEdgeMatching
 import Curvenet.KernelProjection
 import Curvenet.IncompleteCholesky
 import Curvenet.HierarchicalSparsifyCompensate
+import Curvenet.GraphColoring

@@ -523,6 +523,11 @@ struct Hierarchy {
     std::vector<sparse::SparseMatrixCSR>       mats;       // length L (= graph_to_csr per level)
     std::vector<Prolongation>                   prolongs;   // length L-1; prolongs[i] goes level i+1 -> level i
     std::vector<std::vector<double>>           diags;      // length L; cached diag(A_l) for Jacobi
+    // Per-level greedy coloring + per-color row index lists for
+    // multi-color SGS dispatch (parallel within a color, sequential
+    // across colors). Computed once at hierarchy build time.
+    std::vector<std::vector<int>>              colors;          // length L; per-row color id
+    std::vector<std::vector<std::vector<int>>> rows_per_color;  // length L; outer = color id, inner = row indices
 };
 
 // Hierarchy build. Goes deep until coarsest_size or max_levels is
@@ -530,6 +535,105 @@ struct Hierarchy {
 // 2k-vertex bottom-level CG ate the wall time. Instead, let the
 // hierarchy go deep so the bottom is small (~64 verts) where CG
 // converges trivially.
+// Greedy graph coloring on the level's matrix adjacency (off-
+// diagonal entries). Returns one color id per row. Mirror of
+// `lean/Curvenet/GraphColoring.lean::greedyColor`.
+//
+// Used by multi-color symmetric Gauss-Seidel: pre-color the
+// graph so no two adjacent vertices share a color; within a
+// color, all row updates are independent and parallelisable
+// (SIMD on CPU, workgroup-parallel on GPU).
+inline std::vector<int> greedy_color(const sparse::SparseMatrixCSR &A) {
+    const std::size_t n = A.rows;
+    std::vector<int> color(n, 0);
+    std::vector<char> used;
+    used.reserve(64);
+    for (std::size_t i = 0; i < n; ++i) {
+        used.assign(64, 0);
+        const int rs = A.row_ptr[i];
+        const int re = A.row_ptr[i + 1];
+        for (int k = rs; k < re; ++k) {
+            const int j = A.col_idx[k];
+            if (j < static_cast<int>(i) && j != static_cast<int>(i)) {
+                const int cj = color[j];
+                if (cj >= static_cast<int>(used.size())) used.resize(cj + 1, 0);
+                used[cj] = 1;
+            }
+        }
+        int c = 0;
+        while (c < static_cast<int>(used.size()) && used[c]) ++c;
+        color[i] = c;
+    }
+    return color;
+}
+
+// Group rows by color. Returns rows_per_color[c] = list of row
+// indices having color c.
+inline std::vector<std::vector<int>> rows_by_color(
+        const std::vector<int> &color) {
+    int max_c = 0;
+    for (int c : color) if (c > max_c) max_c = c;
+    std::vector<std::vector<int>> out(max_c + 1);
+    for (std::size_t i = 0; i < color.size(); ++i) {
+        out[color[i]].push_back(static_cast<int>(i));
+    }
+    return out;
+}
+
+// Multi-color SGS smoother: forward sweep iterates colors 0..C-1,
+// each color's rows updated in parallel. Backward sweep iterates
+// colors C-1..0. Mathematically equivalent to standard SGS in
+// the limit (same fixed point); converges at a slightly slower
+// rate per iteration but each iteration is parallelisable.
+//
+// `rows_per_color` precomputed at hierarchy build time. Same
+// data layout works for GPU dispatch (one work-group per row of
+// the active color).
+inline void sym_gauss_seidel_smooth_multicolor(
+        const sparse::SparseMatrixCSR &A,
+        const std::vector<double> &diag,
+        const std::vector<double> &b,
+        std::vector<double> &x,
+        const std::vector<std::vector<int>> &rows_per_color,
+        std::size_t nu) {
+    const std::size_t C = rows_per_color.size();
+    for (std::size_t s = 0; s < nu; ++s) {
+        for (std::size_t c = 0; c < C; ++c) {
+            const auto &rows = rows_per_color[c];
+            for (std::size_t r = 0; r < rows.size(); ++r) {
+                const int i = rows[r];
+                const double d = diag[i];
+                if (d == 0.0) continue;
+                double s_full = 0.0;
+                const int rs = A.row_ptr[i];
+                const int re = A.row_ptr[i + 1];
+                for (int k = rs; k < re; ++k) {
+                    s_full += A.values[k] * x[A.col_idx[k]];
+                }
+                const double s_off = s_full - d * x[i];
+                x[i] = (b[i] - s_off) / d;
+            }
+        }
+        for (std::size_t cc = 0; cc < C; ++cc) {
+            const std::size_t c = C - 1 - cc;
+            const auto &rows = rows_per_color[c];
+            for (std::size_t r = 0; r < rows.size(); ++r) {
+                const int i = rows[r];
+                const double d = diag[i];
+                if (d == 0.0) continue;
+                double s_full = 0.0;
+                const int rs = A.row_ptr[i];
+                const int re = A.row_ptr[i + 1];
+                for (int k = rs; k < re; ++k) {
+                    s_full += A.values[k] * x[A.col_idx[k]];
+                }
+                const double s_off = s_full - d * x[i];
+                x[i] = (b[i] - s_off) / d;
+            }
+        }
+    }
+}
+
 inline Hierarchy build_hierarchy(const Graph &fine,
                                      std::size_t coarsest_size = 64,
                                      std::size_t max_levels = 64,
@@ -570,6 +674,8 @@ inline Hierarchy build_hierarchy(const Graph &fine,
     for (const auto &g : h.graphs) {
         h.mats.push_back(graph_to_csr(g));
         h.diags.push_back(sparse::diagonal(h.mats.back()));
+        h.colors.push_back(greedy_color(h.mats.back()));
+        h.rows_per_color.push_back(rows_by_color(h.colors.back()));
     }
     return h;
 }
