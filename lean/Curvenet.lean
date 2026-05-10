@@ -37,3 +37,4 @@ import Curvenet.KernelProjection
 import Curvenet.IncompleteCholesky
 import Curvenet.HierarchicalSparsifyCompensate
 import Curvenet.GraphColoring
+import Curvenet.DirectDeltaMush
