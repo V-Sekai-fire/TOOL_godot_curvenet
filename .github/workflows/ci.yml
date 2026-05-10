@@ -7,6 +7,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  pull-requests: write   # the artifact-link comment step uses this
+
 jobs:
   validate:
     # macos-14 (Apple Silicon) covers everything: Lean's lake build, the
@@ -159,3 +163,55 @@ jobs:
         run: |
           lake build axpy_validate
           lake exe  axpy_validate
+
+      - name: Build the Mire .glb (LeanGltf + EXT_structural_metadata)
+        run: |
+          mkdir -p /tmp/mire
+          misc/mire_h_to_bin.py tests/mire_body_70k_data.h /tmp/mire
+          cd lean && lake exe mire_to_gltf \
+            /tmp/mire/positions.f32 /tmp/mire/tris.i32 /tmp/mire/mire.glb
+
+      - name: Upload Mire .glb as workflow artifact
+        id: upload-mire
+        uses: actions/upload-artifact@v5
+        with:
+          name: mire-glb
+          path: /tmp/mire/mire.glb
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Comment on PR with nightly.link to the .glb
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          REPO="${{ github.repository }}"
+          RUN_ID="${{ github.run_id }}"
+          ART_ID="${{ steps.upload-mire.outputs.artifact-id }}"
+          NIGHTLY_RUN="https://nightly.link/${REPO}/actions/runs/${RUN_ID}/mire-glb.zip"
+          NIGHTLY_ART="https://nightly.link/${REPO}/actions/artifacts/${ART_ID}.zip"
+          ACTIONS_RUN="https://github.com/${REPO}/actions/runs/${RUN_ID}"
+
+          BODY=$(cat <<MSG
+          <!-- mire-glb-link -->
+          ### Mire .glb artifact
+
+          - **Direct download (no GitHub login):** [\`mire-glb.zip\`](${NIGHTLY_ART}) (via [nightly.link](https://nightly.link)).
+          - Same artifact, run-scoped: [\`mire-glb.zip\` for this run](${NIGHTLY_RUN}).
+          - GitHub Actions run page: [run #${RUN_ID}](${ACTIONS_RUN}).
+
+          The zip contains \`mire.glb\` — 81,613 verts × 159,296 tris assembled by \`lake exe mire_to_gltf\`, with the Cesium \`EXT_structural_metadata\` schema (\`Curvenet\` / \`Segment\` / \`Knot\` / \`Sample\` / \`DDMWeights\`) declared in the JSON chunk.
+          MSG
+          )
+
+          # Replace any previous bot comment that has the marker.
+          PR_NUM="${{ github.event.pull_request.number }}"
+          EXISTING=$(gh api "repos/${REPO}/issues/${PR_NUM}/comments" \
+                       --jq '[.[] | select(.body | contains("<!-- mire-glb-link -->"))][0].id')
+          if [ -n "$EXISTING" ] && [ "$EXISTING" != "null" ]; then
+            gh api -X PATCH "repos/${REPO}/issues/comments/${EXISTING}" \
+              -f body="${BODY}" >/dev/null
+            echo "Updated comment $EXISTING"
+          else
+            gh pr comment "$PR_NUM" --body "${BODY}"
+          fi
