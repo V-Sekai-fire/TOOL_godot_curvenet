@@ -325,6 +325,38 @@ start from one frame's actual deformer output to the next.
 
 Reproducer: `make -C tests bench_5k_icc`.
 
+### HSC interactive at 5k: 57 Hz warm-start, 17 ms median frame
+
+After dig phases 1-4 + warm-start measurement.
+
+`tests/bench_hsc_warm_5k`: simulates an interactive session
+where each frame's right-hand side perturbs from the previous
+by `b' = b + A·δx` (handle drag with `‖δx‖ ≈ 1e-4`). Each frame
+warm-starts PCG from the previous frame's solution. 30-frame
+median.
+
+Mire 5k 12-RHS interactive (drift=1e-04 per frame):
+  frame 0 (cold)        :  32 ms
+  warm min              :  16 ms
+  warm median           :  17 ms  ⇒ **57 FPS interactive**
+  warm max              :  21 ms
+  5 ms PCVR target gap  :  3.5×
+
+What this proves: at 5k mesh resolution, **HSC delivers 57-FPS
+interactive character animation** on M2 Pro 12-core, all
+in-house code (no Eigen, no third-party). The 5 ms target is
+out of reach by 3.5× even with realistic warm-start and full
+parallelism — but 57 Hz is already comfortably interactive.
+
+The dig session's individual contributions:
+  Phase 1 (probe)            : confirmed allocation = 12% of V-cycle
+  Phase 2 (persistent scratch): 5k parallel 46 ms → 44 ms (≈5% off)
+  Phase 3 (branchless SGS)   : 5k single 28 ms → 22 ms (≈20% off)
+  Phase 4 (block V-cycle)    : net negative at 5k (kept as opt-in)
+  max_degree sweep / warm    : 47 ms cold → 17 ms warm median
+
+Reproducer: `make -C tests bench_hsc_warm_5k`.
+
 ### HSC + shared-nothing parallelism (max_degree=24 tuning)
 
 Profiled per-level V-cycle cost via `tests/diag_hsc_profile_5k`:
