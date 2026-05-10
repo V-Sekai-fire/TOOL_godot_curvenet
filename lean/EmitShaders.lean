@@ -37,6 +37,12 @@ private def kernels : List (String × SlangShaderModule) :=
   , ("intersection_frames", IntersectionFrames.shader)
   , ("curve_interp",      CurveInterp.shader)
   , ("vec3",              Vec3.shader)
+  , ("halfedge",          Halfedge.shader)
+  , ("halfedge_builder",  HalfedgeBuilder.shader)
+  , ("cut_mesh",          CutMesh.shader)
+  , ("cut_algorithm",     CutAlgorithm.shader)
+  , ("surface_projection", SurfaceProjection.shader)
+  , ("curvenet_builder",  CurvenetBuilder.shader)
   ]
 
 def main (args : List String) : IO UInt32 := do

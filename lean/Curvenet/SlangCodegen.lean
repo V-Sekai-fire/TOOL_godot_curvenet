@@ -17,6 +17,12 @@ import Curvenet.SlangCodegen.SegmentGradient
 import Curvenet.SlangCodegen.IntersectionFrames
 import Curvenet.SlangCodegen.CurveInterp
 import Curvenet.SlangCodegen.Vec3
+import Curvenet.SlangCodegen.Halfedge
+import Curvenet.SlangCodegen.HalfedgeBuilder
+import Curvenet.SlangCodegen.CutMesh
+import Curvenet.SlangCodegen.CutAlgorithm
+import Curvenet.SlangCodegen.SurfaceProjection
+import Curvenet.SlangCodegen.CurvenetBuilder
 
 /-!
 # `Curvenet.SlangCodegen` — Slang shader codegen umbrella
