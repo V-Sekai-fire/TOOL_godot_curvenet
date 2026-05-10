@@ -26,4 +26,8 @@ tests/slang_validate/build/
 *.dSYM/
 *.log
 *.pyc
+__pycache__/
 compile_commands.json
+
+# safetensors round-trip scratch dir
+tests/safetensors/rt/

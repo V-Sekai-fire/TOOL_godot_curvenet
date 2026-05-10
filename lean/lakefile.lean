@@ -8,6 +8,7 @@ require LeanSlang from git
 
 @[default_target] lean_lib Curvenet where
 @[default_target] lean_lib LeanGltf where
+@[default_target] lean_lib LeanSafetensors where
 
 lean_exe emit_shaders where
   root := `EmitShaders
@@ -16,11 +17,14 @@ lean_exe axpy_validate where
   root := `AxpyValidate
   supportInterpreter := true
 
-lean_exe mire_to_gltf where
-  root := `MireToGltf
-
 lean_exe gltf_inspect where
   root := `GltfInspect
+
+lean_exe safetensors_roundtrip where
+  root := `SafetensorsRoundtrip
+
+lean_exe safetensors_to_gltf where
+  root := `SafetensorsToGltf
 
 extern_lib axpy_native pkg := do
   let workDir := pkg.dir / "native"
