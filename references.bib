@@ -461,3 +461,30 @@
   doi     = {10.1145/3592104},
   url     = {https://wanghmin.github.io/publication/lan-2023-sos/Lan-2023-SOS.pdf}
 }
+
+% =================================================================
+% Solver path chosen post loops 8-100/9: HSC (Hierarchical Sparsify
+% and Compensate) is the algorithmically right answer for graph
+% Laplacians at character-mesh sizes. O(1) iters as preconditioner
+% for PCG, O(n) work per V-cycle, MIT reference implementation
+% available for cross-checking. Replaces the tombstoned
+% multilevel-Schwarz / HEM / kernel-projection family by adding
+% the Schur-compensation step they lacked.
+% =================================================================
+
+@article{KrishnanFattalSzeliski2013HSC,
+  author  = {Krishnan, Dilip and Fattal, Raanan and
+             Szeliski, Richard},
+  title   = {Efficient Preconditioning of {Laplacian} Matrices for
+             Computer Graphics},
+  journal = {ACM Transactions on Graphics (SIGGRAPH)},
+  volume  = {32},
+  number  = {4},
+  articleno = {142},
+  numpages = {15},
+  year    = {2013},
+  doi     = {10.1145/2461912.2461992},
+  url     = {https://www.cs.huji.ac.il/w~raananf/projects/hsc/paper.pdf},
+  note    = {Reference C++ implementation:
+             https://github.com/dilipkay/hsc (MIT licensed)}
+}
