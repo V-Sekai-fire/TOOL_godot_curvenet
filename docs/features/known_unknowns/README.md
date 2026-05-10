@@ -1,10 +1,13 @@
-# todo/
+# known_unknowns/
 
-Per-feature execution slices for the gaps catalogued in
-[`docs/FEATURES.md`](../docs/FEATURES.md). Each todo captures the
-**Gall-minimum** next step: a simple working extension of the current
-working system, not a full design for the end state. Pick one off the
-list, work through it independently, ship it.
+Gaps we know about — one Gall-minimum execution slice per feature gap.
+Each captures the smallest viable working extension of the current
+system, not a full design for the end state. Pick one off the list,
+work through it independently, ship it.
+
+For features that ARE shipped see [`../known/`](../known/). For risk
+categories where we don't yet have operational data see
+[`../unknown_unknowns/`](../unknown_unknowns/).
 
 ## Status legend
 
