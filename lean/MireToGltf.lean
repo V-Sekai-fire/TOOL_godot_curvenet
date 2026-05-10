@@ -127,49 +127,39 @@ def readFp32LE (xs : ByteArray) (base : Nat) : Float :=
   let bits : UInt32 := b0 ||| (b1 <<< 8) ||| (b2 <<< 16) ||| (b3 <<< 24)
   fp32BitsToFloat bits
 
-/-- Encode an fp32 bit pattern as four little-endian bytes appended
-    to `acc`. Hand-rolled because Lean's `Float` is fp64 and there's
-    no built-in fp32 round-trip. Subnormals collapse to zero. -/
-def fp32ToLEBytes (acc : ByteArray) (f : Float) : ByteArray :=
-  let bits : UInt32 :=
-    if f == 0.0 then 0
-    else
-      let sign : UInt32 := if f < 0.0 then 0x80000000 else 0
-      let af := f.abs
-      -- exp = floor(log2(af))   (Float.toInt64 truncates toward zero,
-      -- so we apply Float.floor first to get true floor for negatives.)
-      let e0 := Float.log2 af
-      let e := (Float.floor e0).toInt64.toInt
-      let scale := Float.pow 2.0 (-(Float.ofInt e))
-      let mantNorm := af * scale  -- in [1.0, 2.0)
-      let mantFrac := mantNorm - 1.0
-      let mantBits : UInt32 :=
-        (mantFrac * Float.pow 2.0 23.0).toUInt32
-      let biased : Int := e + 127
-      if biased ≤ 0 then
-        sign  -- underflow → 0
-      else if biased ≥ 0xFF then
-        sign ||| ((0xFF : UInt32) <<< 23)  -- overflow → ±inf
-      else
-        sign ||| (biased.toNat.toUInt32 <<< 23) ||| (mantBits &&& 0x7FFFFF)
-  acc.push (bits &&& 0xFF).toUInt8
-     |>.push ((bits >>> 8)  &&& 0xFF).toUInt8
-     |>.push ((bits >>> 16) &&& 0xFF).toUInt8
-     |>.push ((bits >>> 24) &&& 0xFF).toUInt8
+/-- Convert a Z-up positions buffer (Mire / Blender / Godot
+    convention) into the Y-up convention glTF requires.
 
-/-- Convert a Z-up positions buffer (Mire / Blender convention) into
-    the Y-up convention glTF requires by mapping each vertex
-    `(X, Y, Z) → (X, Z, -Y)` (a -90° rotation around X). -/
+    Mapping per vertex: `(X, Y, Z) → (X, Z, -Y)` — a -90° rotation
+    around X.
+
+    Implemented at the byte level, not via Float decode + encode:
+    the X word is copied verbatim, the Z word's bytes move into the
+    Y slot verbatim, and -Y is the Y word with its IEEE-754 sign
+    bit flipped (XOR 0x80 against the high byte). No fp32 ↔ fp64
+    round-trip, no rounding, no encoder to debug. -/
 def zupToYup (xs : ByteArray) : ByteArray := Id.run do
   let n := xs.size / 12
   let mut out : ByteArray := ByteArray.empty
   for i in [:n] do
-    let x := readFp32LE xs (12*i + 0)
-    let y := readFp32LE xs (12*i + 4)
-    let z := readFp32LE xs (12*i + 8)
-    out := fp32ToLEBytes out x
-    out := fp32ToLEBytes out z
-    out := fp32ToLEBytes out (-y)
+    let base := 12 * i
+    -- X stays in X (4 bytes, verbatim).
+    out := out.push xs[base + 0]!
+              |>.push xs[base + 1]!
+              |>.push xs[base + 2]!
+              |>.push xs[base + 3]!
+    -- Z (bytes 8..11 of the source) becomes Y (verbatim).
+    out := out.push xs[base + 8]!
+              |>.push xs[base + 9]!
+              |>.push xs[base + 10]!
+              |>.push xs[base + 11]!
+    -- -Y becomes Z. fp32 IEEE-754 keeps the sign in the top bit of
+    -- the highest-address byte (little-endian byte 7 of (Y, Y, Y, Y)).
+    -- XOR with 0x80 flips that bit.
+    out := out.push xs[base + 4]!
+              |>.push xs[base + 5]!
+              |>.push xs[base + 6]!
+              |>.push (xs[base + 7]! ^^^ 0x80)
   return out
 
 /-- Min/max accessor stats over a flat float buffer with 3-component
