@@ -415,6 +415,40 @@ inline std::vector<double> v_cycle_apply(const Hierarchy &h,
     return x;
 }
 
+// HSC-preconditioned conjugate gradient. Same shape as
+// `incomplete_cholesky::cg_icc_with_guess` but with the V-cycle
+// as the preconditioner apply: M^{-1}·r = v_cycle_apply(h, r).
+inline std::vector<double> cg_hsc_with_guess(
+        const sparse::SparseMatrixCSR &A,
+        const Hierarchy &h,
+        const std::vector<double> &b,
+        const std::vector<double> &x0,
+        std::size_t max_iter,
+        double tol) {
+    std::vector<double> x = x0;
+    const std::vector<double> Ax0 = sparse::spmv(A, x0);
+    std::vector<double> r = sparse::saxpby(1.0, b, -1.0, Ax0);
+    std::vector<double> z = v_cycle_apply(h, r);
+    std::vector<double> p = z;
+    double rz_old = sparse::dot(r, z);
+    const double tol_sq = tol * tol;
+    for (std::size_t iter = 0; iter < max_iter; ++iter) {
+        const std::vector<double> Ap = sparse::spmv(A, p);
+        const double pAp = sparse::dot(p, Ap);
+        if (pAp == 0.0) break;
+        const double alpha = rz_old / pAp;
+        sparse::axpy_inplace(alpha, p, x);
+        sparse::axpy_inplace(-alpha, Ap, r);
+        if (sparse::dot(r, r) < tol_sq) break;
+        z = v_cycle_apply(h, r);
+        const double rz_new = sparse::dot(r, z);
+        const double beta = (rz_old == 0.0) ? 0.0 : (rz_new / rz_old);
+        p = sparse::saxpby(1.0, z, beta, p);
+        rz_old = rz_new;
+    }
+    return x;
+}
+
 } // namespace hsc
 } // namespace curvenet
 
