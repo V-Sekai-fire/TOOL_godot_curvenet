@@ -162,6 +162,12 @@ bin/bench_deform_5k_icc: bench_deform_5k_icc.cpp mire_body_data.h | bin
 bench_5k_icc: bin/bench_deform_5k_icc
 	@bin/bench_deform_5k_icc
 
+bin/diag_warm_start_drift_5k: diag_warm_start_drift_5k.cpp mire_body_data.h | bin
+	$(CXX) $(BENCH_CXXFLAGS) -o $@ $<
+
+diag_warm_start_drift_5k: bin/diag_warm_start_drift_5k
+	@bin/diag_warm_start_drift_5k
+
 bin/bench_deform_70k_icc: bench_deform_70k_icc.cpp mire_body_70k_data.h | bin
 	$(CXX) $(BENCH_CXXFLAGS) -o $@ $<
 

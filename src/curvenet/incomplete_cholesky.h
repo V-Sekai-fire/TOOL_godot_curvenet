@@ -31,6 +31,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "kernel_projection.h"
 #include "sparse_linalg.h"
 
 namespace curvenet {
@@ -248,22 +249,91 @@ inline IncompleteCholeskyFactor factor_with_retry(const sparse::SparseMatrixCSR 
     return fac;
 }
 
+// Per-iter diagnostic returned by cg_icc_with_guess_diag.
+struct PcgIterTrace {
+    std::size_t iter;
+    double      r_inf;       // L_inf of residual
+    double      x_inf;       // L_inf of iterate
+    double      alpha;
+    double      beta;
+    double      rz;          // (r, M^{-1} r)
+    double      pAp;
+};
+
+// Diagnostic variant of cg_icc_with_guess: returns the iterate
+// history so we can see exactly when/how the iteration diverges
+// on a warm-start with drifted right-hand side. Same numerics as
+// cg_icc_with_guess; the trace adds ~O(iter) memory and a
+// constant work per iter for the L_inf scans.
+inline std::vector<double> cg_icc_with_guess_diag(
+        const sparse::SparseMatrixCSR &A,
+        const IncompleteCholeskyFactor &fac,
+        const std::vector<double> &b,
+        const std::vector<double> &x0,
+        std::size_t max_iter,
+        double tol,
+        std::vector<PcgIterTrace> &trace,
+        bool project_kernel = false) {
+    std::vector<double> x = x0;
+    const std::vector<double> Ax0 = sparse::spmv(A, x0);
+    std::vector<double> r = sparse::saxpby(1.0, b, -1.0, Ax0);
+    std::vector<double> z = apply_minv(fac, r);
+    if (project_kernel) kernel_projection::zero_mean_in_place(z);
+    std::vector<double> p = z;
+    double rz_old = sparse::dot(r, z);
+    const double tol_sq = tol * tol;
+    for (std::size_t iter = 0; iter < max_iter; ++iter) {
+        const std::vector<double> Ap = sparse::spmv(A, p);
+        const double pAp = sparse::dot(p, Ap);
+        if (pAp == 0.0) break;
+        const double alpha = rz_old / pAp;
+        sparse::axpy_inplace(alpha, p, x);
+        sparse::axpy_inplace(-alpha, Ap, r);
+        double r_inf = 0.0, x_inf = 0.0;
+        for (double v : r) r_inf = std::max(r_inf, std::fabs(v));
+        for (double v : x) x_inf = std::max(x_inf, std::fabs(v));
+        const double rr = sparse::dot(r, r);
+        z = apply_minv(fac, r);
+        if (project_kernel) kernel_projection::zero_mean_in_place(z);
+        const double rz_new = sparse::dot(r, z);
+        const double beta = (rz_old == 0.0) ? 0.0 : (rz_new / rz_old);
+        trace.push_back({ iter, r_inf, x_inf, alpha, beta, rz_old, pAp });
+        if (rr < tol_sq) break;
+        p = sparse::saxpby(1.0, z, beta, p);
+        rz_old = rz_new;
+    }
+    return x;
+}
+
 // ICC(0)-PCG with an explicit initial guess. Mirror of
 // `sparse::cg_with_guess` with the inner Jacobi preconditioner
-// swapped for `apply(fac, ...)`. Same convergence semantics:
-// when `x0` is close to the true solution, residual starts small
-// and iter count drops.
+// swapped for `apply_minv(fac, ...)`.
+//
+// `project_kernel`: when true, zero-means the preconditioned
+// search direction `z = M^{-1} r` at every iter. Required when A
+// has a 1D constant null-space (cot-Laplacian) AND PCG is
+// warm-started from a non-zero x0 close to the solution. Without
+// it, fp error in A·x leaks into r and the iterate diverges over
+// many iters even though ‖r0‖ is tiny — see
+// `tests/diag_warm_start_drift_5k.cpp` and PERF_BASELINE.md
+// "Warm-start drift fix (loop 100/6)". The cost is one
+// O(n) reduction per iter, negligible vs the SpMV / backsolve.
+//
+// Default `false` to preserve callers that don't need it (cold
+// solves on consistent b are fine without projection).
 inline std::vector<double> cg_icc_with_guess(
         const sparse::SparseMatrixCSR &A,
         const IncompleteCholeskyFactor &fac,
         const std::vector<double> &b,
         const std::vector<double> &x0,
         std::size_t max_iter,
-        double tol) {
+        double tol,
+        bool project_kernel = false) {
     std::vector<double> x = x0;
     const std::vector<double> Ax0 = sparse::spmv(A, x0);
     std::vector<double> r = sparse::saxpby(1.0, b, -1.0, Ax0);
     std::vector<double> z = apply_minv(fac, r);
+    if (project_kernel) kernel_projection::zero_mean_in_place(z);
     std::vector<double> p = z;
     double rz_old = sparse::dot(r, z);
     const double tol_sq = tol * tol;
@@ -276,6 +346,7 @@ inline std::vector<double> cg_icc_with_guess(
         sparse::axpy_inplace(-alpha, Ap, r);
         if (sparse::dot(r, r) < tol_sq) break;
         z = apply_minv(fac, r);
+        if (project_kernel) kernel_projection::zero_mean_in_place(z);
         const double rz_new = sparse::dot(r, z);
         const double beta = (rz_old == 0.0) ? 0.0 : (rz_new / rz_old);
         p = sparse::saxpby(1.0, z, beta, p);

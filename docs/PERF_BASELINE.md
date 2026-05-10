@@ -242,6 +242,42 @@ The reproducer for the stall is `tests/diag_multi_level_schwarz_70k`.
 The earlier 70k Chebyshev and 2-level Schwarz diags were removed
 as redundant.
 
+### Warm-start drift retraction (loop 100/6)
+
+The "shifted-ICC + drifted-b diverges" finding from loop 100/5 was
+a test artifact, not a solver bug. `tests/diag_warm_start_drift_5k`
+isolates the issue:
+
+| test                                 | iters | final \|r\|_inf | converges |
+|---|---:|---:|:---:|
+| cold solve b (original)              |  337  | 2.0e-10        | ✓ |
+| warm same-b                          |   0   | (instant)      | ✓ |
+| warm + synthetic b_pert (sin drift)  |  --- | 1e+15          | ✗ diverges |
+| warm + realistic b' = b + A·δx       |  320  | 5.3e-10        | ✓ |
+| cold on realistic b' (control)       |  341  | 3.5e-10        | ✓ |
+
+The synthetic perturbation `b_pert = b + drift·sin(0.0007·i)` hits
+A's lowest-eigenvalue modes hard, requiring a true solution of
+magnitude ~5e+5 that fp64 can't track stably through PCG iters.
+That's why both warm AND cold solves diverge on it. Real
+frame-to-frame deformer right-hand sides are `b' = b + A·δx`
+(handle drag → smooth shift `δx`), which is automatically in
+range(A) and bounded by `‖δx‖`.
+
+`incomplete_cholesky::cg_icc_with_guess` got an opt-in
+`project_kernel` flag (default off) that zero-means `M⁻¹·r` each
+iter — kept as infrastructure but doesn't matter for realistic
+input. With or without projection, warm-start converges in 320
+vs cold 341 iters at 5k — **only 6 % savings**. The actual perf
+bottleneck is iter count from matrix conditioning, not warm-start.
+
+Implication for the 5 ms PCVR target at 50k verts: warm-start is
+not the lever. The path to 5 ms is reducing the conditioning
+(direct solver instead of PCG, or a stronger preconditioner) or
+GPU parallelism, not better starting guesses.
+
+Reproducer: `make -C tests diag_warm_start_drift_5k`.
+
 ### Warm-start measured at 5k (loop 100/5)
 
 Per Gall's law: measure the working simple system before evolving
