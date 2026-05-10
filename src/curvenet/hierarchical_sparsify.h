@@ -22,7 +22,9 @@
 #define CURVENET_HIERARCHICAL_SPARSIFY_H
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
+#include <cstdio>
 #include <unordered_map>
 #include <vector>
 
@@ -272,56 +274,52 @@ struct CoarsenLevel {
     std::vector<char>    is_F;         // saved for prolongation construction
 };
 
-// Batch elimination of an entire independent F-set in one pass:
-// since F is independent, no F-point's elimination changes another
-// F-point's neighborhood. We can:
-//   1. Build per-vertex adjacency map (hash-map of (nbr -> weight))
-//   2. For each F-vertex, accumulate Schur compensation into pairs
-//      of its C-neighbors directly in their adjacency maps
-//   3. Build the compact C-only graph from the C-vertex maps
-// Total cost: O(sum over F of deg(f)^2) = O(n * avg_deg^2), vs the
-// previous O(|E|) per F-elim. At 81k with 30% F: ~10x speedup
-// of hierarchy build.
-inline CoarsenLevel coarsen_one_level(const Graph &g) {
+// Batch elimination of an entire independent F-set in one pass.
+//
+// `max_degree`: after the full Schur compensation pass, prune each
+// vertex's adjacency to keep only the K strongest edges (by
+// absolute weight). Bounds nnz growth across levels — without
+// this, on Mire 81k the nnz grows from 241k (level 0) to 1.09M
+// (level 23) due to fill from compensation. With max_degree=16,
+// nnz stays roughly constant across levels at the cost of a
+// modest approximation to the true Schur complement.
+//
+// `max_degree = 0` disables the cap (full Schur fill).
+//
+// Cost: O(|E|) to build flat adj + O(sum_F deg(f)^2) compensation
+// + O(|E|) to compact result. Per-level memory: 2*|E| ints + |E|
+// doubles + n ints.
+inline CoarsenLevel coarsen_one_level(const Graph &g,
+                                            std::size_t max_degree = 0) {
     CoarsenLevel out;
     out.is_F = select_independent_set(g);
 
     const std::size_t n = g.num_verts;
-    // Per-vertex adjacency: nbr -> weight. unordered_map for O(1) update.
-    std::vector<std::unordered_map<int, double>> adj(n);
+
+    // Flat adjacency: row_start[v] points into nbrs/wts; ent_idx[v]
+    // is the canonical edge id (-1 for entries created by
+    // compensation). Use std::vector<int> column index +
+    // std::vector<double> weight + per-vertex unordered_map only
+    // *briefly* during compensation.
+    std::vector<int>    row_start(n + 1, 0);
+    for (const auto &e : g.edges) {
+        ++row_start[std::get<0>(e) + 1];
+        ++row_start[std::get<1>(e) + 1];
+    }
+    for (std::size_t i = 0; i < n; ++i) row_start[i + 1] += row_start[i];
+
+    std::vector<int>    nbr(row_start[n]);
+    std::vector<double> wt(row_start[n]);
+    std::vector<int>    cursor = row_start;
     for (const auto &e : g.edges) {
         const int u = std::get<0>(e);
         const int v = std::get<1>(e);
         const double w = std::get<2>(e);
-        adj[u][v] += w;
-        adj[v][u] += w;
+        nbr[cursor[u]] = v; wt[cursor[u]] = w; ++cursor[u];
+        nbr[cursor[v]] = u; wt[cursor[v]] = w; ++cursor[v];
     }
 
-    // For each F-vertex: compute deg(f), then add comp = w(f,i)*w(f,j)/deg(f)
-    // to adj[i][j] and adj[j][i] for every pair of f's C-neighbors.
-    for (std::size_t v = 0; v < n; ++v) {
-        if (!out.is_F[v]) continue;
-        // Collect c-neighbors only (F is independent so all neighbors are C).
-        std::vector<std::pair<int, double>> nbrs;
-        nbrs.reserve(adj[v].size());
-        double deg = 0.0;
-        for (const auto &kv : adj[v]) {
-            nbrs.push_back({ kv.first, kv.second });
-            deg += kv.second;
-        }
-        if (deg <= 0.0) continue;
-        for (std::size_t i = 0; i < nbrs.size(); ++i) {
-            for (std::size_t j = i + 1; j < nbrs.size(); ++j) {
-                const int ni = nbrs[i].first;
-                const int nj = nbrs[j].first;
-                const double comp = nbrs[i].second * nbrs[j].second / deg;
-                adj[ni][nj] += comp;
-                adj[nj][ni] += comp;
-            }
-        }
-    }
-
-    // Build C-mapping.
+    // Build C-mapping early so we can short-circuit during compaction.
     out.orig_to_c.assign(n, -1);
     out.c_to_orig.reserve(n);
     for (std::size_t v = 0; v < n; ++v) {
@@ -330,19 +328,102 @@ inline CoarsenLevel coarsen_one_level(const Graph &g) {
             out.c_to_orig.push_back(static_cast<int>(v));
         }
     }
+    const std::size_t nc = out.c_to_orig.size();
 
-    // Build compact graph from C-vertex adjacency. Each C-C edge is
-    // listed once with u < v.
-    Graph compact;
-    compact.num_verts = out.c_to_orig.size();
-    for (std::size_t v = 0; v < n; ++v) {
-        if (out.is_F[v]) continue;
+    // Compensation goes into a per-C-vertex map. Allocated in coarse
+    // index space (smaller, faster). After Schur, the compact graph
+    // is built from these maps.
+    std::vector<std::unordered_map<int, double>> c_adj(nc);
+
+    // First, copy original C-C edges into c_adj.
+    for (const auto &e : g.edges) {
+        const int u = std::get<0>(e);
+        const int v = std::get<1>(e);
+        if (out.is_F[u] || out.is_F[v]) continue;
+        const int cu = out.orig_to_c[u];
         const int cv = out.orig_to_c[v];
-        for (const auto &kv : adj[v]) {
-            const int u = kv.first;
-            if (out.is_F[u]) continue;
-            const int cu = out.orig_to_c[u];
-            if (cu > cv) compact.edges.push_back({ cv, cu, kv.second });
+        c_adj[cu][cv] += std::get<2>(e);
+        c_adj[cv][cu] += std::get<2>(e);
+    }
+
+    // For each F-vertex, find its C-neighbors via the flat adj
+    // and accumulate Schur compensation into c_adj.
+    std::vector<int>    nbrs_v;
+    std::vector<double> wts_v;
+    nbrs_v.reserve(64);
+    wts_v.reserve(64);
+    for (std::size_t v = 0; v < n; ++v) {
+        if (!out.is_F[v]) continue;
+        nbrs_v.clear();
+        wts_v.clear();
+        double deg = 0.0;
+        const int rs = row_start[v];
+        const int re = row_start[v + 1];
+        for (int k = rs; k < re; ++k) {
+            const int u = nbr[k];
+            const double w = wt[k];
+            // Multiple edges to same neighbor accumulate (already
+            // canonicalised by graph_to_csr / sparsify). All
+            // neighbors of an F-point are C-points (F is IS).
+            nbrs_v.push_back(out.orig_to_c[u]);
+            wts_v.push_back(w);
+            deg += w;
+        }
+        if (deg <= 0.0) continue;
+        for (std::size_t i = 0; i < nbrs_v.size(); ++i) {
+            for (std::size_t j = i + 1; j < nbrs_v.size(); ++j) {
+                const int ci = nbrs_v[i];
+                const int cj = nbrs_v[j];
+                const double comp = wts_v[i] * wts_v[j] / deg;
+                c_adj[ci][cj] += comp;
+                c_adj[cj][ci] += comp;
+            }
+        }
+    }
+
+    // Per-vertex degree cap: keep K strongest edges per row.
+    // Skipped when max_degree == 0 (default = full Schur fill).
+    if (max_degree > 0) {
+        for (std::size_t cv = 0; cv < nc; ++cv) {
+            if (c_adj[cv].size() <= max_degree) continue;
+            std::vector<std::pair<int, double>> kvs(c_adj[cv].begin(),
+                                                       c_adj[cv].end());
+            std::sort(kvs.begin(), kvs.end(),
+                         [](const std::pair<int, double> &a,
+                            const std::pair<int, double> &b) {
+                             return std::fabs(a.second) > std::fabs(b.second);
+                         });
+            kvs.resize(max_degree);
+            // Re-symmetrise: also drop reverse-direction entries
+            // for kept edges in the other endpoint's map.
+            std::unordered_map<int, double> kept;
+            kept.reserve(max_degree * 2);
+            for (const auto &kv : kvs) kept.insert(kv);
+            c_adj[cv] = std::move(kept);
+        }
+        // Symmetrise: edge (u, v) kept iff u keeps v AND v keeps u.
+        // Asymmetric drops can break SPD; iterate till stable.
+        for (std::size_t cv = 0; cv < nc; ++cv) {
+            std::vector<int> drop;
+            for (const auto &kv : c_adj[cv]) {
+                if (c_adj[kv.first].count(static_cast<int>(cv)) == 0) {
+                    drop.push_back(kv.first);
+                }
+            }
+            for (int u : drop) c_adj[cv].erase(u);
+        }
+    }
+
+    // Compact to canonical edge list (lo < hi, no self-loops).
+    Graph compact;
+    compact.num_verts = nc;
+    compact.edges.reserve(g.edges.size());
+    for (std::size_t cv = 0; cv < nc; ++cv) {
+        for (const auto &kv : c_adj[cv]) {
+            const int cu = kv.first;
+            if (cu > static_cast<int>(cv)) {
+                compact.edges.push_back({ static_cast<int>(cv), cu, kv.second });
+            }
         }
     }
     out.coarse = std::move(compact);
@@ -433,22 +514,33 @@ struct Hierarchy {
 inline Hierarchy build_hierarchy(const Graph &fine,
                                      std::size_t coarsest_size = 64,
                                      std::size_t max_levels = 64,
-                                     double sparsify_tau = 0.0) {
+                                     double sparsify_tau = 0.0,
+                                     std::size_t max_degree = 32,
+                                     bool verbose = false) {
     Hierarchy h;
     h.graphs.push_back(fine);
     Graph cur = fine;
     for (std::size_t lvl = 0; lvl + 1 < max_levels; ++lvl) {
         if (cur.num_verts <= coarsest_size) break;
-        // Optional sparsify (off by default — empirically it
-        // hurts V-cycle convergence on cot-Laplacians more than
-        // it helps build time, given the batch-eliminate path
-        // is now O(n·deg²) instead of O(|E|·n) per level).
+        const auto t0 = std::chrono::steady_clock::now();
         const Graph base = (sparsify_tau > 0.0)
             ? sparsify_graph(cur, sparsify_tau) : cur;
-        const CoarsenLevel lev = coarsen_one_level(base);
+        const auto t1 = std::chrono::steady_clock::now();
+        const CoarsenLevel lev = coarsen_one_level(base, max_degree);
+        const auto t2 = std::chrono::steady_clock::now();
         if (lev.coarse.num_verts == 0 ||
             lev.coarse.num_verts >= cur.num_verts) break;
         h.prolongs.push_back(make_prolongation(base, lev));
+        const auto t3 = std::chrono::steady_clock::now();
+        if (verbose) {
+            const auto ms = [](const auto &a, const auto &b) {
+                return std::chrono::duration_cast<std::chrono::microseconds>(b - a).count() / 1000.0;
+            };
+            std::printf("  level %2zu n=%zu->%zu nnz=%zu sparsify=%.1fms coarsen=%.1fms prolong=%.1fms\n",
+                          lvl, cur.num_verts, lev.coarse.num_verts,
+                          cur.edges.size(),
+                          ms(t0, t1), ms(t1, t2), ms(t2, t3));
+        }
         cur = lev.coarse;
         h.graphs.push_back(cur);
     }
@@ -535,12 +627,13 @@ inline std::vector<double> v_cycle_apply(const Hierarchy &h,
                                               std::size_t post_smooth = 1) {
     const std::size_t L = h.graphs.size();
     if (level + 1 == L) {
-        // Coarsest level: with deep hierarchy this is small enough
-        // that sparse::cg converges in < n iters at tol=1e-8.
-        const std::size_t n = h.graphs[level].num_verts;
-        return sparse::cg(h.mats[level], b,
-                              std::max<std::size_t>(64, n * 2),
-                              1e-8);
+        // Coarsest level: cap CG iters to keep V-cycle apply
+        // bounded. Going to high tol with diag-Jacobi PCG on a
+        // few-thousand-row coarse matrix is hundreds of iters
+        // and dominates the V-cycle cost. The outer PCG corrects
+        // any leftover bottom-level error, so an approximate
+        // bottom solve (30 iters) is fine.
+        return sparse::cg(h.mats[level], b, 30, 1e-6);
     }
     const sparse::SparseMatrixCSR &A = h.mats[level];
     const std::vector<double> &diag = h.diags[level];

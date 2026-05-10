@@ -325,6 +325,38 @@ start from one frame's actual deformer output to the next.
 
 Reproducer: `make -C tests bench_5k_icc`.
 
+### HSC FINAL — beats ICC at every scale measured ✓
+
+After "try harder" iteration: per-vertex degree cap on the
+Schur-compensated coarse graph is the load-bearing fix.
+
+The fill-explosion diagnostic showed nnz growing from 241k
+(level 0) to 1.09M (level 23) on Mire 81k due to cross-edges
+created by Schur compensation. Adding `max_degree = 32` to
+`coarsen_one_level`: after the full Schur pass, prune each
+vertex's adjacency to keep only the K strongest edges by
+absolute weight. Bounds nnz growth across levels at the cost
+of a modest approximation to the true Schur complement.
+
+| metric           | Mire 5k      |              | Mire 81k    |              |
+|------------------|--------------|-------------:|-------------|-------------:|
+|                  | **HSC**      | ICC          | **HSC**     | ICC          |
+| build            | **105 ms**   | 264 ms       | **5.0 s**   | 28.2 s       |
+| solve (1 RHS)    | **31 ms / 8 iters**  | 43 ms / 350+ iters | **2.31 s / 27 iters** | 3.49 s / 2500+ iters |
+| total (cold)     | **136 ms**   | 307 ms       | **7.3 s**   | 31.5 s       |
+
+**HSC wins at every metric: 1.4× faster solve at 5k, 1.5×
+faster solve at 81k, 2.5-5.7× faster build.** For 12-RHS deformer
+frames at 81k: HSC 5 s build + 12 × 2.31 s = 32.7 s vs ICC's
+70 s — **2.1× faster cold-start frame**.
+
+The 5 ms PCVR target is still out of reach (`docs/IMPOSSIBILITY.md`
+remains accurate — direct sparse Cholesky is the only path there)
+but HSC is now strictly better than ICC and replaces it as the
+recommended iterative path.
+
+Reproducer: `make -C tests bench_hsc_5k bench_hsc_81k`.
+
 ### HSC at 81k — definitive measurement, retract cycle-2
 
 After cycle-1+3 fixes (depth handling, SGS smoother, batch

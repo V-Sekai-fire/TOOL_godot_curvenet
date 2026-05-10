@@ -75,7 +75,11 @@ int main() {
     // Build HSC hierarchy.
     const double t_hb = now_ms();
     const hscn::Graph g = hscn::csr_to_graph(A);
-    const hscn::Hierarchy h = hscn::build_hierarchy(g, /*coarsest_size=*/64);
+    const hscn::Hierarchy h = hscn::build_hierarchy(g, /*coarsest_size=*/64,
+                                                            /*max_levels=*/64,
+                                                            /*sparsify_tau=*/0.0,
+                                                            /*max_degree=*/32,
+                                                            /*verbose=*/false);
     const double hsc_build_ms = now_ms() - t_hb;
     std::printf("HSC hierarchy: %zu levels, sizes ", h.graphs.size());
     for (const auto &gr : h.graphs) std::printf("%zu ", gr.num_verts);
