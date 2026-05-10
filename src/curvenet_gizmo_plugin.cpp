@@ -46,6 +46,7 @@ CurveNetGizmoPlugin::CurveNetGizmoPlugin() {
 	create_material("frame_t", Color(1.0f, 0.3f, 0.3f, 1.0f));
 	create_material("frame_n", Color(0.3f, 1.0f, 0.3f, 1.0f));
 	create_material("frame_b", Color(0.3f, 0.5f, 1.0f, 1.0f));
+	create_material("width_ring", Color(0.3f, 1.0f, 0.7f, 0.6f));
 	create_handle_material("knot_handles",    false);
 	create_handle_material("tangent_handles", false);
 }
@@ -578,14 +579,21 @@ void CurveNetGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 	// segments at each knot showing the local (tangent, normal, binormal)
 	// frame, with the normal/binormal rotated by the artist's tilt
 	// (Curve3D::get_point_tilt) around the tangent. Makes tilt visible.
+	// Plus an octagonal width ring perpendicular to tangent, scaled by
+	// the per-knot width from `knot_widths` (default 1.0).
 	const float frame_axis_len = 0.10f;
+	const float width_ring_base_radius = 0.08f;
 	PackedVector3Array frame_t_lines;
 	PackedVector3Array frame_n_lines;
 	PackedVector3Array frame_b_lines;
+	PackedVector3Array width_ring_lines;
+	const TypedArray<PackedFloat32Array> widths_arr = deformer->get_knot_widths();
 	for (int ci = 0; ci < curves.size(); ++ci) {
 		Ref<Curve3D> c = curves[ci];
 		if (c.is_null()) continue;
 		const int n = c->get_point_count();
+		PackedFloat32Array curve_widths;
+		if (ci < widths_arr.size()) curve_widths = widths_arr[ci];
 		for (int ki = 0; ki < n; ++ki) {
 			const Vector3 origin = c->get_point_position(ki);
 			// Tangent: prefer outgoing, fall back to incoming.
@@ -624,6 +632,19 @@ void CurveNetGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 			frame_n_lines.push_back(origin + nv * frame_axis_len);
 			frame_b_lines.push_back(origin);
 			frame_b_lines.push_back(origin + b  * frame_axis_len);
+			// Width ring: octagon in the (b, n) plane scaled by width w.
+			float w = 1.0f;
+			if (ki < curve_widths.size()) w = curve_widths[ki];
+			const float r = width_ring_base_radius * w;
+			constexpr int RING_SEG = 8;
+			Vector3 prev = origin + b * r;
+			for (int s = 1; s <= RING_SEG; ++s) {
+				const float ang = static_cast<float>(s) * (6.28318530718f / RING_SEG);
+				const Vector3 cur = origin + (b * std::cos(ang) + nv * std::sin(ang)) * r;
+				width_ring_lines.push_back(prev);
+				width_ring_lines.push_back(cur);
+				prev = cur;
+			}
 		}
 	}
 	if (frame_t_lines.size() > 0) {
@@ -637,6 +658,10 @@ void CurveNetGizmoPlugin::_redraw(const Ref<EditorNode3DGizmo> &p_gizmo) {
 	if (frame_b_lines.size() > 0) {
 		p_gizmo->add_lines(frame_b_lines, get_material("frame_b", p_gizmo), false,
 			Color(0.3f, 0.5f, 1.0f, 1.0f));
+	}
+	if (width_ring_lines.size() > 0) {
+		p_gizmo->add_lines(width_ring_lines, get_material("width_ring", p_gizmo), false,
+			Color(0.3f, 1.0f, 0.7f, 0.6f));
 	}
 
 	// Projection links: from each merged knot to its closest mesh vertex

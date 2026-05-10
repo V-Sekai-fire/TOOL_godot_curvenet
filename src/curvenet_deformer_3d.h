@@ -38,6 +38,12 @@ class CurveNetDeformer3D : public MeshInstance3D {
 
 	NodePath source_path;
 	TypedArray<Curve3D> profile_curves;
+	// Per-knot width-along-binormal (DeGoes22 §3 `w`). One
+	// PackedFloat32Array per curve, parallel to its point_count. Missing
+	// entries default to 1.0 (unit cross-section). Length-along-tangent
+	// `l` is auto-derived from segment lengths so doesn't need a parallel
+	// array.
+	TypedArray<PackedFloat32Array> knot_widths;
 	double length_tiebreak = 0.1;
 	bool deformation_active = false;
 	// Incomplete-Cholesky preconditioner opt-in. Off by default;
@@ -115,6 +121,11 @@ class CurveNetDeformer3D : public MeshInstance3D {
 		// at bind time; Δtilt = posed - rest is composed into F_h at
 		// runtime as a rotation around the posed tangent.
 		std::vector<std::vector<double>>          rest_curve_tilts;
+
+		// Rest-pose per-knot width-along-binormal `w` (DeGoes22 §3). Baked
+		// from `knot_widths` at bind time; length-along-tangent `l` is
+		// auto-derived from segment length and not cached.
+		std::vector<std::vector<double>>          rest_curve_widths;
 	};
 	mutable RestCache rest_cache;
 
@@ -131,6 +142,9 @@ public:
 
 	void set_profile_curves(const TypedArray<Curve3D> &p_curves);
 	TypedArray<Curve3D> get_profile_curves() const;
+
+	void set_knot_widths(const TypedArray<PackedFloat32Array> &p_widths);
+	TypedArray<PackedFloat32Array> get_knot_widths() const;
 
 	void set_length_tiebreak(double p_v);
 	double get_length_tiebreak() const;

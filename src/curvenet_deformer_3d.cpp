@@ -38,6 +38,12 @@ void CurveNetDeformer3D::_bind_methods() {
 							  String::num_int64(Variant::OBJECT) + "/" + String::num_int64(PROPERTY_HINT_RESOURCE_TYPE) + ":Curve3D"),
 			"set_profile_curves", "get_profile_curves");
 
+	ClassDB::bind_method(D_METHOD("set_knot_widths", "widths"), &CurveNetDeformer3D::set_knot_widths);
+	ClassDB::bind_method(D_METHOD("get_knot_widths"), &CurveNetDeformer3D::get_knot_widths);
+	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "knot_widths", PROPERTY_HINT_ARRAY_TYPE,
+							  String::num_int64(Variant::PACKED_FLOAT32_ARRAY)),
+			"set_knot_widths", "get_knot_widths");
+
 	ClassDB::bind_method(D_METHOD("set_length_tiebreak", "v"), &CurveNetDeformer3D::set_length_tiebreak);
 	ClassDB::bind_method(D_METHOD("get_length_tiebreak"), &CurveNetDeformer3D::get_length_tiebreak);
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "length_tiebreak", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"),
@@ -89,6 +95,7 @@ void CurveNetDeformer3D::invalidate_cache() {
 	rest_cache.ddm_built = false;
 	rest_cache.rest_curve_knots.clear();
 	rest_cache.rest_curve_tilts.clear();
+	rest_cache.rest_curve_widths.clear();
 }
 
 void CurveNetDeformer3D::set_source_path(const NodePath &p_path) {
@@ -104,6 +111,17 @@ void CurveNetDeformer3D::set_profile_curves(const TypedArray<Curve3D> &p_curves)
 	profile_curves = p_curves;
 	// Profile curves don't affect the rest-pose cache (only bindings do); no
 	// invalidation needed.
+}
+
+void CurveNetDeformer3D::set_knot_widths(const TypedArray<PackedFloat32Array> &p_widths) {
+	knot_widths = p_widths;
+	// Widths feed into per-handle F_h at runtime; rest widths are baked
+	// at the next rebuild. Don't invalidate on mere edit — the artist may
+	// be tweaking widths interactively.
+}
+
+TypedArray<PackedFloat32Array> CurveNetDeformer3D::get_knot_widths() const {
+	return knot_widths;
 }
 
 TypedArray<Curve3D> CurveNetDeformer3D::get_profile_curves() const {
@@ -330,24 +348,38 @@ void CurveNetDeformer3D::apply_deformation() {
 		// bind time is the rest pose; subsequent drags treat it as posed.
 		rest_cache.rest_curve_knots.clear();
 		rest_cache.rest_curve_tilts.clear();
+		rest_cache.rest_curve_widths.clear();
 		rest_cache.rest_curve_knots.reserve(profile_curves.size());
 		rest_cache.rest_curve_tilts.reserve(profile_curves.size());
+		rest_cache.rest_curve_widths.reserve(profile_curves.size());
 		for (int i = 0; i < profile_curves.size(); ++i) {
 			Ref<Curve3D> c = profile_curves[i];
 			std::vector<curvenet::Vec3> rk;
 			std::vector<double>         rt;
+			std::vector<double>         rw;
 			if (c.is_valid()) {
 				const int n = c->get_point_count();
 				rk.reserve(n);
 				rt.reserve(n);
+				rw.reserve(n);
+				PackedFloat32Array curve_widths;
+				if (i < knot_widths.size()) {
+					curve_widths = knot_widths[i];
+				}
 				for (int j = 0; j < n; ++j) {
 					Vector3 p = c->get_point_position(j);
 					rk.push_back({ p.x, p.y, p.z });
 					rt.push_back(static_cast<double>(c->get_point_tilt(j)));
+					double wj = 1.0;
+					if (j < curve_widths.size()) {
+						wj = static_cast<double>(curve_widths[j]);
+					}
+					rw.push_back(wj);
 				}
 			}
 			rest_cache.rest_curve_knots.push_back(std::move(rk));
 			rest_cache.rest_curve_tilts.push_back(std::move(rt));
+			rest_cache.rest_curve_widths.push_back(std::move(rw));
 		}
 
 		rest_cache.source_hash = hash_val;
@@ -552,6 +584,45 @@ void CurveNetDeformer3D::apply_deformation() {
 						const curvenet::Vec3 posed_q{ pq_v.x, pq_v.y, pq_v.z };
 						F = curvenet::scaled_frames::isolated_segment_gradient(
 							rest_p, rest_q, posed_p, posed_q);
+					}
+
+					// DeGoes22 §3 width: scale perpendicular to the posed
+					// tangent by s_w = w_posed / w_rest, identity along the
+					// tangent. Implements the body-cross-section knob.
+					const auto &rest_widths = rest_cache.rest_curve_widths[curve_id];
+					double s_w = 1.0;
+					if (static_cast<std::size_t>(knot_idx) < rest_widths.size()
+					    && rest_widths[knot_idx] > 1e-9) {
+						double w_posed = 1.0;
+						if (curve_id < knot_widths.size()) {
+							PackedFloat32Array curve_widths = knot_widths[curve_id];
+							if (knot_idx < curve_widths.size()) {
+								w_posed = static_cast<double>(curve_widths[knot_idx]);
+							}
+						}
+						s_w = w_posed / rest_widths[knot_idx];
+					}
+					if (std::fabs(s_w - 1.0) > 1e-9) {
+						curvenet::Vec3 t_axis{ 1.0, 0.0, 0.0 };
+						if (knot_idx + 1 < curve->get_point_count()) {
+							Vector3 q = curve->get_point_position(knot_idx + 1);
+							t_axis = { q.x - posed_p.x, q.y - posed_p.y, q.z - posed_p.z };
+						} else if (knot_idx - 1 >= 0) {
+							Vector3 q = curve->get_point_position(knot_idx - 1);
+							t_axis = { posed_p.x - q.x, posed_p.y - q.y, posed_p.z - q.z };
+						}
+						const double tn = std::sqrt(t_axis.x * t_axis.x + t_axis.y * t_axis.y + t_axis.z * t_axis.z);
+						if (tn > 1e-12) {
+							t_axis = { t_axis.x / tn, t_axis.y / tn, t_axis.z / tn };
+							// F_perp = s_w · I + (1 - s_w) · t⊗tᵀ
+							const double k = 1.0 - s_w;
+							curvenet::scaled_frames::Mat3 F_perp =
+								curvenet::scaled_frames::mat3_make(
+									s_w + k * t_axis.x * t_axis.x, k * t_axis.x * t_axis.y, k * t_axis.x * t_axis.z,
+									k * t_axis.y * t_axis.x, s_w + k * t_axis.y * t_axis.y, k * t_axis.y * t_axis.z,
+									k * t_axis.z * t_axis.x, k * t_axis.z * t_axis.y, s_w + k * t_axis.z * t_axis.z);
+							F = curvenet::scaled_frames::mat3_mul(F_perp, F);
+						}
 					}
 
 					// DeGoes22 §3 tilt: rotation around the posed tangent by
