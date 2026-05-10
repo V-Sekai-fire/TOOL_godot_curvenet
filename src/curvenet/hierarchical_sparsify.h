@@ -177,6 +177,47 @@ inline sparse::SparseMatrixCSR graph_to_csr(const Graph &g) {
     return out;
 }
 
+// Drop edges with weight below `tau * max_neighbor_weight(u or v)`.
+// Krishnan-Fattal-Szeliski 2013 §3 "Sparsify": weak edges
+// contribute little to the matrix's action on smooth modes, so
+// dropping them keeps the graph sparse without losing spectral
+// quality on the modes multigrid is good at. The retained
+// strong edges form a "skeleton" that supports the next IS
+// selection without fill explosion.
+//
+// Without this step, Schur compensation grows graph density
+// monotonically: at 81k after 5 levels of coarsening the IS
+// density falls below 10% and the hierarchy stalls.
+//
+// `tau = 0.001` empirically: drops only the very weakest edges
+// (below 0.1% of the strongest local edge). More aggressive
+// values (0.05) overshoot and break V-cycle convergence on
+// our cot-Laplacian since "weak" edges still carry meaningful
+// spectral information at the small-shift end.
+inline Graph sparsify_graph(const Graph &g, double tau = 0.001) {
+    const std::size_t n = g.num_verts;
+    // max edge weight per vertex
+    std::vector<double> max_w(n, 0.0);
+    for (const auto &e : g.edges) {
+        const int u = std::get<0>(e);
+        const int v = std::get<1>(e);
+        const double w = std::get<2>(e);
+        if (w > max_w[u]) max_w[u] = w;
+        if (w > max_w[v]) max_w[v] = w;
+    }
+    Graph out;
+    out.num_verts = n;
+    out.edges.reserve(g.edges.size());
+    for (const auto &e : g.edges) {
+        const int u = std::get<0>(e);
+        const int v = std::get<1>(e);
+        const double w = std::get<2>(e);
+        const double thresh = tau * std::min(max_w[u], max_w[v]);
+        if (w >= thresh) out.edges.push_back(e);
+    }
+    return out;
+}
+
 // Greedy maximum-independent-set selection of "F-points" — the
 // vertices to eliminate at this level. A vertex is selected as
 // F when it has no F-neighbors yet; all its neighbors are then
@@ -231,34 +272,77 @@ struct CoarsenLevel {
     std::vector<char>    is_F;         // saved for prolongation construction
 };
 
+// Batch elimination of an entire independent F-set in one pass:
+// since F is independent, no F-point's elimination changes another
+// F-point's neighborhood. We can:
+//   1. Build per-vertex adjacency map (hash-map of (nbr -> weight))
+//   2. For each F-vertex, accumulate Schur compensation into pairs
+//      of its C-neighbors directly in their adjacency maps
+//   3. Build the compact C-only graph from the C-vertex maps
+// Total cost: O(sum over F of deg(f)^2) = O(n * avg_deg^2), vs the
+// previous O(|E|) per F-elim. At 81k with 30% F: ~10x speedup
+// of hierarchy build.
 inline CoarsenLevel coarsen_one_level(const Graph &g) {
     CoarsenLevel out;
     out.is_F = select_independent_set(g);
-    Graph cur = g;
-    for (std::size_t v = 0; v < g.num_verts; ++v) {
-        if (out.is_F[v]) cur = eliminate_vertex(cur, static_cast<int>(v));
+
+    const std::size_t n = g.num_verts;
+    // Per-vertex adjacency: nbr -> weight. unordered_map for O(1) update.
+    std::vector<std::unordered_map<int, double>> adj(n);
+    for (const auto &e : g.edges) {
+        const int u = std::get<0>(e);
+        const int v = std::get<1>(e);
+        const double w = std::get<2>(e);
+        adj[u][v] += w;
+        adj[v][u] += w;
     }
-    // Build the C-mapping.
-    out.orig_to_c.assign(g.num_verts, -1);
-    out.c_to_orig.reserve(g.num_verts);
-    for (std::size_t v = 0; v < g.num_verts; ++v) {
+
+    // For each F-vertex: compute deg(f), then add comp = w(f,i)*w(f,j)/deg(f)
+    // to adj[i][j] and adj[j][i] for every pair of f's C-neighbors.
+    for (std::size_t v = 0; v < n; ++v) {
+        if (!out.is_F[v]) continue;
+        // Collect c-neighbors only (F is independent so all neighbors are C).
+        std::vector<std::pair<int, double>> nbrs;
+        nbrs.reserve(adj[v].size());
+        double deg = 0.0;
+        for (const auto &kv : adj[v]) {
+            nbrs.push_back({ kv.first, kv.second });
+            deg += kv.second;
+        }
+        if (deg <= 0.0) continue;
+        for (std::size_t i = 0; i < nbrs.size(); ++i) {
+            for (std::size_t j = i + 1; j < nbrs.size(); ++j) {
+                const int ni = nbrs[i].first;
+                const int nj = nbrs[j].first;
+                const double comp = nbrs[i].second * nbrs[j].second / deg;
+                adj[ni][nj] += comp;
+                adj[nj][ni] += comp;
+            }
+        }
+    }
+
+    // Build C-mapping.
+    out.orig_to_c.assign(n, -1);
+    out.c_to_orig.reserve(n);
+    for (std::size_t v = 0; v < n; ++v) {
         if (!out.is_F[v]) {
             out.orig_to_c[v] = static_cast<int>(out.c_to_orig.size());
             out.c_to_orig.push_back(static_cast<int>(v));
         }
     }
-    // Compact `cur`: rename vertex indices to the C-only space and
-    // strip out edges that touch (now-isolated) F-points.
+
+    // Build compact graph from C-vertex adjacency. Each C-C edge is
+    // listed once with u < v.
     Graph compact;
     compact.num_verts = out.c_to_orig.size();
-    compact.edges.reserve(cur.edges.size());
-    for (const auto &e : cur.edges) {
-        const int a = std::get<0>(e);
-        const int b = std::get<1>(e);
-        const int ca = out.orig_to_c[a];
-        const int cb = out.orig_to_c[b];
-        if (ca >= 0 && cb >= 0 && ca != cb) {
-            compact.edges.push_back({ std::min(ca, cb), std::max(ca, cb), std::get<2>(e) });
+    for (std::size_t v = 0; v < n; ++v) {
+        if (out.is_F[v]) continue;
+        const int cv = out.orig_to_c[v];
+        for (const auto &kv : adj[v]) {
+            const int u = kv.first;
+            if (out.is_F[u]) continue;
+            const int cu = out.orig_to_c[u];
+            if (cu > cv) compact.edges.push_back({ cv, cu, kv.second });
         }
     }
     out.coarse = std::move(compact);
@@ -341,18 +425,30 @@ struct Hierarchy {
     std::vector<std::vector<double>>           diags;      // length L; cached diag(A_l) for Jacobi
 };
 
+// Hierarchy build. Goes deep until coarsest_size or max_levels is
+// hit. The cycle-1 attempt to cap depth at 5 didn't help: the
+// 2k-vertex bottom-level CG ate the wall time. Instead, let the
+// hierarchy go deep so the bottom is small (~64 verts) where CG
+// converges trivially.
 inline Hierarchy build_hierarchy(const Graph &fine,
                                      std::size_t coarsest_size = 64,
-                                     std::size_t max_levels = 16) {
+                                     std::size_t max_levels = 64,
+                                     double sparsify_tau = 0.0) {
     Hierarchy h;
     h.graphs.push_back(fine);
     Graph cur = fine;
     for (std::size_t lvl = 0; lvl + 1 < max_levels; ++lvl) {
         if (cur.num_verts <= coarsest_size) break;
-        const CoarsenLevel lev = coarsen_one_level(cur);
+        // Optional sparsify (off by default — empirically it
+        // hurts V-cycle convergence on cot-Laplacians more than
+        // it helps build time, given the batch-eliminate path
+        // is now O(n·deg²) instead of O(|E|·n) per level).
+        const Graph base = (sparsify_tau > 0.0)
+            ? sparsify_graph(cur, sparsify_tau) : cur;
+        const CoarsenLevel lev = coarsen_one_level(base);
         if (lev.coarse.num_verts == 0 ||
             lev.coarse.num_verts >= cur.num_verts) break;
-        h.prolongs.push_back(make_prolongation(cur, lev));
+        h.prolongs.push_back(make_prolongation(base, lev));
         cur = lev.coarse;
         h.graphs.push_back(cur);
     }
@@ -382,6 +478,52 @@ inline void jacobi_smooth(const sparse::SparseMatrixCSR &A,
     }
 }
 
+// Symmetric Gauss-Seidel smoother: forward sweep then backward
+// sweep, both in-place using already-updated entries. Stronger
+// per-sweep contraction than damped Jacobi (the standard
+// V-cycle smoother for graph Laplacians).
+//
+// One nu = 1 SGS step ≈ 2-3 Jacobi sweeps in error reduction
+// for the same SpMV-equivalent work, so the V-cycle hits the
+// same residual drop in fewer effective sweeps. Per Gall's-law
+// cycle 1 of the HSC fix.
+inline void sym_gauss_seidel_smooth(const sparse::SparseMatrixCSR &A,
+                                          const std::vector<double> &diag,
+                                          const std::vector<double> &b,
+                                          std::vector<double> &x,
+                                          std::size_t nu) {
+    const std::size_t n = A.rows;
+    for (std::size_t s = 0; s < nu; ++s) {
+        // Forward sweep: x[i] = (b[i] - sum_{j<i} A[i,j] x[j] - sum_{j>i} A[i,j] x[j]) / A[i,i]
+        for (std::size_t i = 0; i < n; ++i) {
+            const double d = diag[i];
+            if (d == 0.0) continue;
+            double s_off = 0.0;
+            const int rs = A.row_ptr[i];
+            const int re = A.row_ptr[i + 1];
+            for (int k = rs; k < re; ++k) {
+                const int j = A.col_idx[k];
+                if (j != static_cast<int>(i)) s_off += A.values[k] * x[j];
+            }
+            x[i] = (b[i] - s_off) / d;
+        }
+        // Backward sweep, same recurrence reversed.
+        for (std::size_t ii = 0; ii < n; ++ii) {
+            const std::size_t i = n - 1 - ii;
+            const double d = diag[i];
+            if (d == 0.0) continue;
+            double s_off = 0.0;
+            const int rs = A.row_ptr[i];
+            const int re = A.row_ptr[i + 1];
+            for (int k = rs; k < re; ++k) {
+                const int j = A.col_idx[k];
+                if (j != static_cast<int>(i)) s_off += A.values[k] * x[j];
+            }
+            x[i] = (b[i] - s_off) / d;
+        }
+    }
+}
+
 // One V-cycle apply: solve `A_level · x = b` approximately by
 //   pre-smooth -> restrict residual -> recurse -> prolong -> post-smooth
 // At the coarsest level uses sparse::cg as a direct-equivalent
@@ -389,21 +531,24 @@ inline void jacobi_smooth(const sparse::SparseMatrixCSR &A,
 inline std::vector<double> v_cycle_apply(const Hierarchy &h,
                                               const std::vector<double> &b,
                                               std::size_t level = 0,
-                                              std::size_t pre_smooth = 3,
-                                              std::size_t post_smooth = 3) {
+                                              std::size_t pre_smooth = 1,
+                                              std::size_t post_smooth = 1) {
     const std::size_t L = h.graphs.size();
     if (level + 1 == L) {
-        // Coarsest: small CG. The matrix is small (~64 rows by
-        // default) so 4·n iters at tol=1e-10 is exact-equivalent.
+        // Coarsest level: with deep hierarchy this is small enough
+        // that sparse::cg converges in < n iters at tol=1e-8.
         const std::size_t n = h.graphs[level].num_verts;
         return sparse::cg(h.mats[level], b,
-                              std::max<std::size_t>(64, n * 4),
-                              1e-10);
+                              std::max<std::size_t>(64, n * 2),
+                              1e-8);
     }
     const sparse::SparseMatrixCSR &A = h.mats[level];
     const std::vector<double> &diag = h.diags[level];
     std::vector<double> x(b.size(), 0.0);
-    jacobi_smooth(A, diag, b, x, pre_smooth);
+    // SGS smoother per cycle 1: stronger contraction per sweep
+    // than damped Jacobi. nu=1 SGS ≈ 2-3 Jacobi sweeps of
+    // equivalent error reduction.
+    sym_gauss_seidel_smooth(A, diag, b, x, pre_smooth);
     const std::vector<double> Ax = sparse::spmv(A, x);
     std::vector<double> r(b.size());
     for (std::size_t i = 0; i < b.size(); ++i) r[i] = b[i] - Ax[i];
@@ -412,20 +557,25 @@ inline std::vector<double> v_cycle_apply(const Hierarchy &h,
                                                        pre_smooth, post_smooth);
     const std::vector<double> e = prolong(h.prolongs[level], ec);
     for (std::size_t i = 0; i < b.size(); ++i) x[i] += e[i];
-    jacobi_smooth(A, diag, b, x, post_smooth);
+    sym_gauss_seidel_smooth(A, diag, b, x, post_smooth);
     return x;
 }
 
 // HSC-preconditioned conjugate gradient. Same shape as
 // `incomplete_cholesky::cg_icc_with_guess` but with the V-cycle
 // as the preconditioner apply: M^{-1}·r = v_cycle_apply(h, r).
+//
+// `iters_out` is an optional pointer to receive the actual iter
+// count — used by the bench to distinguish "fast per-iter but
+// many iters" from "few iters but slow per-iter".
 inline std::vector<double> cg_hsc_with_guess(
         const sparse::SparseMatrixCSR &A,
         const Hierarchy &h,
         const std::vector<double> &b,
         const std::vector<double> &x0,
         std::size_t max_iter,
-        double tol) {
+        double tol,
+        std::size_t *iters_out = nullptr) {
     std::vector<double> x = x0;
     const std::vector<double> Ax0 = sparse::spmv(A, x0);
     std::vector<double> r = sparse::saxpby(1.0, b, -1.0, Ax0);
@@ -433,13 +583,15 @@ inline std::vector<double> cg_hsc_with_guess(
     std::vector<double> p = z;
     double rz_old = sparse::dot(r, z);
     const double tol_sq = tol * tol;
+    std::size_t iters = 0;
     for (std::size_t iter = 0; iter < max_iter; ++iter) {
         const std::vector<double> Ap = sparse::spmv(A, p);
         const double pAp = sparse::dot(p, Ap);
-        if (pAp == 0.0) break;
+        if (pAp == 0.0) { iters = iter; break; }
         const double alpha = rz_old / pAp;
         sparse::axpy_inplace(alpha, p, x);
         sparse::axpy_inplace(-alpha, Ap, r);
+        iters = iter + 1;
         if (sparse::dot(r, r) < tol_sq) break;
         z = v_cycle_apply(h, r);
         const double rz_new = sparse::dot(r, z);
@@ -447,6 +599,7 @@ inline std::vector<double> cg_hsc_with_guess(
         p = sparse::saxpby(1.0, z, beta, p);
         rz_old = rz_new;
     }
+    if (iters_out) *iters_out = iters;
     return x;
 }
 

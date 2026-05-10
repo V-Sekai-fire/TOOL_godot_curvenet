@@ -186,6 +186,12 @@ bin/bench_hsc_5k: bench_hsc_5k.cpp mire_body_data.h | bin
 bench_hsc_5k: bin/bench_hsc_5k
 	@bin/bench_hsc_5k
 
+bin/bench_hsc_81k: bench_hsc_81k.cpp mire_body_70k_data.h | bin
+	$(CXX) $(BENCH_CXXFLAGS) -o $@ $<
+
+bench_hsc_81k: bin/bench_hsc_81k
+	@bin/bench_hsc_81k
+
 bin/bench_deform_70k_icc: bench_deform_70k_icc.cpp mire_body_70k_data.h | bin
 	$(CXX) $(BENCH_CXXFLAGS) -o $@ $<
 

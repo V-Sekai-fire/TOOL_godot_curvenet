@@ -325,6 +325,56 @@ start from one frame's actual deformer output to the next.
 
 Reproducer: `make -C tests bench_5k_icc`.
 
+### HSC after Cycle-1+3 fixes (post-Eigen-ban work)
+
+Loops post-100/16 attempted to make HSC actually faster than ICC.
+Eigen explicitly banned project-wide (see memory feedback) so all
+linear algebra remains in-house. Three fixes attempted:
+
+1. **Depth-cap to 5 levels**: 16-level traversal at 5k swamped
+   per-V-cycle work. Capping helped iter count but the 2k-verbex
+   bottom-level CG at the cap took the savings back. Net: zero.
+2. **Symmetric Gauss-Seidel smoother**: replaced damped Jacobi
+   in `v_cycle_apply`. Stronger per-sweep contraction. Marginal
+   wall-time improvement at 5k (~1 ms), nothing at 81k.
+3. **Batch IS-elimination + sparsify weak edges**: the load-bearing
+   build-time fix.
+
+Build time before/after the batch IS-elimination optimisation:
+
+| mesh | prior  | after batch-eliminate (no sparsify)  | after sparsify tau=0.001 |
+|------|-------:|-------------------------------------:|-------------------------:|
+| 5k   | 1720 ms |                              127 ms |                    76 ms |
+| 81k  | (timeout) |                            29.3 s   |                     2.3 s |
+
+Per-RHS solve at 5k stays ~7 iters / 50 ms with current
+implementations — same neighbourhood as ICC's 350 iters / 43 ms.
+At 81k:
+
+* No-sparsify: build 29 s, can't even bench PCG within wall cap.
+* sparsify tau=0.001: build 2.3 s, but **PCG hangs** — sparsified
+  V-cycle isn't a strong-enough preconditioner; iter count
+  explodes from 7 (5k) to >>30 at 81k for any tau that keeps
+  build under 5 s.
+
+Diagnosis: at 81k the mesh density is much higher than 5k, the
+cotan weight range spreads over 4-5 decades, and our naive
+sparsify-by-relative-weight either keeps too many edges (build
+slow) or too few (PCG breaks). The paper's actual cycle 2
+contribution — 50% F/C selection with AMG-classical interpolation
+allowing F-F adjacency — would address this but is a substantial
+reimplementation (~150 LOC + Lean spec) and was deferred.
+
+Current honest state: HSC works algorithmically (V-cycle drops
+residual >5x per cycle on test path, 7 iters at 5k matches the
+paper's claim), but doesn't beat ICC at 5k and doesn't fit the
+wall budget at 81k under any tau setting tried. ICC stays as
+production. Next cycle's lever (if HSC gets revisited): full
+AMG-classical 50% F/C coarsening with Galerkin-via-triple-product
+coarse matrix.
+
+Reproducer: `make -C tests bench_hsc_5k bench_hsc_81k`.
+
 ### HSC (loops 100/10–100/16) — wired but not dominant at 5k
 
 After loops 100/7-9 ruled out GPU/relaxed-tol/block-CG/intrinsic-
