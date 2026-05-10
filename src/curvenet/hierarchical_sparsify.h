@@ -645,33 +645,35 @@ inline void sym_gauss_seidel_smooth(const sparse::SparseMatrixCSR &A,
                                           const std::vector<double> &b,
                                           std::vector<double> &x,
                                           std::size_t nu) {
+    // Compute full row dot-product including diagonal, then subtract
+    // diagonal contribution. Removes the per-iter `if (j != i)`
+    // branch from the hot inner loop, letting the compiler tighten
+    // the SpMV-style accumulator. Phase 3 of the dig plan.
     const std::size_t n = A.rows;
     for (std::size_t s = 0; s < nu; ++s) {
-        // Forward sweep: x[i] = (b[i] - sum_{j<i} A[i,j] x[j] - sum_{j>i} A[i,j] x[j]) / A[i,i]
         for (std::size_t i = 0; i < n; ++i) {
             const double d = diag[i];
             if (d == 0.0) continue;
-            double s_off = 0.0;
+            double s_full = 0.0;
             const int rs = A.row_ptr[i];
             const int re = A.row_ptr[i + 1];
             for (int k = rs; k < re; ++k) {
-                const int j = A.col_idx[k];
-                if (j != static_cast<int>(i)) s_off += A.values[k] * x[j];
+                s_full += A.values[k] * x[A.col_idx[k]];
             }
+            const double s_off = s_full - d * x[i];
             x[i] = (b[i] - s_off) / d;
         }
-        // Backward sweep, same recurrence reversed.
         for (std::size_t ii = 0; ii < n; ++ii) {
             const std::size_t i = n - 1 - ii;
             const double d = diag[i];
             if (d == 0.0) continue;
-            double s_off = 0.0;
+            double s_full = 0.0;
             const int rs = A.row_ptr[i];
             const int re = A.row_ptr[i + 1];
             for (int k = rs; k < re; ++k) {
-                const int j = A.col_idx[k];
-                if (j != static_cast<int>(i)) s_off += A.values[k] * x[j];
+                s_full += A.values[k] * x[A.col_idx[k]];
             }
+            const double s_off = s_full - d * x[i];
             x[i] = (b[i] - s_off) / d;
         }
     }
