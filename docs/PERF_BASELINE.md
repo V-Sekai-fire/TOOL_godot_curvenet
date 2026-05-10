@@ -325,6 +325,36 @@ start from one frame's actual deformer output to the next.
 
 Reproducer: `make -C tests bench_5k_icc`.
 
+### HSC + shared-nothing parallelism
+
+`cg_hsc_with_guess` takes only const-references and produces a
+fresh `x` from stack-local scratch. The `Hierarchy` is read-only
+during solve — no shared mutable state. 12 RHS solves run
+embarrassingly-parallel via std::thread.
+
+`tests/bench_hsc_parallel_{5k,81k}.cpp`:
+
+| metric                       | Mire 5k    | Mire 81k     |
+|------------------------------|-----------:|-------------:|
+| sequential 12-RHS            |    444 ms  |       214 s  |
+| parallel 12-RHS (12 cores)   | **73 ms**  |    **86 s**  |
+| speedup                      | **6.09×**  |     2.48×    |
+| correctness                  | bit-exact  | bit-exact    |
+
+5k parallel HSC is the clearest win — 73 ms for a 12-RHS frame
+on a 5k mesh, very close to interactive territory. At 81k, the
+2.48× speedup is bandwidth-bound: 12 threads × ~40 MB hierarchy
+working set spills M2 Pro's 24 MB L3. ICC's tighter per-iter
+access pattern fits cache better; parallel ICC (same
+shared-nothing pattern, untested) might compete with parallel
+HSC at 81k.
+
+For desktop PCVR with 8-12 P-cores: 5k parallel HSC clears the
+last bandwidth ceiling for character-mesh-sized problems. 81k+
+remains direct-Cholesky territory if the 5 ms target is firm.
+
+Reproducer: `make -C tests bench_hsc_parallel_5k bench_hsc_parallel_81k`.
+
 ### HSC FINAL — beats ICC at every scale measured ✓
 
 After "try harder" iteration: per-vertex degree cap on the
