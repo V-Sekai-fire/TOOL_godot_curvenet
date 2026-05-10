@@ -46,6 +46,10 @@ private def kernels : List (String × SlangShaderModule) :=
   , ("incomplete_cholesky", IncompleteCholesky.shader)
   , ("hierarchical_sparsify", HierarchicalSparsify.shader)
   , ("cut_mesh_laplacian", CutMeshLaplacian.shader)
+  , ("dense_linalg",      DenseLinAlg.shader)
+  , ("sparse_linalg",     SparseLinAlg.shader)
+  , ("harmonic_solve",    HarmonicSolve.shader)
+  , ("deform_solve",      DeformSolve.shader)
   ]
 
 def main (args : List String) : IO UInt32 := do

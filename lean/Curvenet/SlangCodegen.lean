@@ -26,6 +26,10 @@ import Curvenet.SlangCodegen.CurvenetBuilder
 import Curvenet.SlangCodegen.IncompleteCholesky
 import Curvenet.SlangCodegen.HierarchicalSparsify
 import Curvenet.SlangCodegen.CutMeshLaplacian
+import Curvenet.SlangCodegen.DenseLinAlg
+import Curvenet.SlangCodegen.SparseLinAlg
+import Curvenet.SlangCodegen.HarmonicSolve
+import Curvenet.SlangCodegen.DeformSolve
 
 /-!
 # `Curvenet.SlangCodegen` — Slang shader codegen umbrella
