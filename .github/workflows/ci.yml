@@ -85,3 +85,103 @@ jobs:
         run: |
           lake build axpy_validate
           lake exe  axpy_validate
+
+  metal:
+    # Apple Silicon runner — Metal API is paravirtualized through to the M1
+    # GPU. Intel macos runners (macos-13 and earlier) lack GPU passthrough;
+    # this job MUST stay on macos-14 / macos-latest.
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache .elan + lake-packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.elan
+            lean/.lake/packages
+            lean/.lake/build
+          key: elan-lake-mac-${{ hashFiles('lean/lean-toolchain', 'lean/lake-manifest.json') }}
+
+      - name: Install elan / Lean
+        run: |
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: lake build
+        working-directory: lean
+        run: lake build
+
+      - name: Cache Slang toolchain (macOS aarch64)
+        uses: actions/cache@v4
+        with:
+          path: bin/.slang
+          key: slang-mac-${{ hashFiles('misc/install-slang.sh') }}
+
+      - name: Fetch slangc
+        run: |
+          if [ ! -x bin/.slang/bin/slangc ]; then
+            misc/install-slang.sh
+          fi
+          bin/slangc -v
+
+      - name: Emit every Slang kernel
+        working-directory: lean
+        run: |
+          mkdir -p /tmp/emitted_shaders
+          lake exe emit_shaders /tmp/emitted_shaders
+
+      - name: Verify metal toolchain available
+        run: |
+          xcrun -sdk macosx metal --version
+          xcrun -sdk macosx metallib --version
+
+      - name: slangc -target metal + xcrun metal + xcrun metallib (every kernel)
+        run: |
+          ok=0; total=0; failed=
+          mkdir -p /tmp/metal_out
+          for f in /tmp/emitted_shaders/*.slang; do
+            total=$((total+1))
+            name="$(basename "$f" .slang)"
+            metal_src="/tmp/metal_out/${name}.metal"
+            air="/tmp/metal_out/${name}.air"
+            lib="/tmp/metal_out/${name}.metallib"
+
+            if ! bin/slangc -target metal -stage compute -entry main \
+                   -o "$metal_src" "$f" 2>/tmp/slangc_metal.log; then
+              failed="$failed ${name}:slangc-metal"
+              cat /tmp/slangc_metal.log | head -5
+              continue
+            fi
+            if ! xcrun -sdk macosx metal -c "$metal_src" -o "$air" 2>/tmp/metal_compile.log; then
+              failed="$failed ${name}:xcrun-metal"
+              cat /tmp/metal_compile.log | head -5
+              continue
+            fi
+            if ! xcrun -sdk macosx metallib "$air" -o "$lib" 2>/tmp/metallib.log; then
+              failed="$failed ${name}:metallib"
+              cat /tmp/metallib.log | head -5
+              continue
+            fi
+
+            # .metallib magic: 0xfeedfeed (little-endian) at offset 0
+            magic=$(xxd -l 4 -p "$lib")
+            size=$(stat -f%z "$lib")
+            if [ "$magic" = "edfeedfe" ] && [ "$size" -gt 100 ]; then
+              ok=$((ok+1))
+            else
+              failed="$failed ${name}:bad-metallib(size=$size,magic=$magic)"
+            fi
+          done
+          echo "$ok / $total kernels compile to .metallib via Metal toolchain"
+          if [ -n "$failed" ]; then
+            echo "FAILED:$failed"
+            exit 1
+          fi
+
+      - name: Lean equivalence proofs (Apple Silicon)
+        working-directory: lean
+        run: |
+          lake build axpy_validate
+          lake exe  axpy_validate
