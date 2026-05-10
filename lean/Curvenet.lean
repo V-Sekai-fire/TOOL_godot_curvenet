@@ -38,5 +38,4 @@ import Curvenet.GraphColoring
 import Curvenet.DirectDeltaMush
 import Curvenet.DirectDeltaMushBind
 import Curvenet.SlangCodegen
-import Curvenet.SlangValidate.Axpy
 import Curvenet.Features

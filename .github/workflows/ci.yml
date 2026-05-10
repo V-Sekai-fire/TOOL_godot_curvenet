@@ -28,10 +28,6 @@ jobs:
             | sh -s -- -y --default-toolchain none
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
-      - name: lake build
-        working-directory: lean
-        run: lake build
-
       - name: Cache Slang toolchain
         uses: actions/cache@v4
         with:
@@ -44,6 +40,10 @@ jobs:
             misc/install-slang.sh
           fi
           bin/slangc -v
+
+      - name: lake build (slangc available so axpy_native links)
+        working-directory: lean
+        run: lake build
 
       - name: Emit every Slang kernel
         working-directory: lean
@@ -109,10 +109,6 @@ jobs:
             | sh -s -- -y --default-toolchain none
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
-      - name: lake build
-        working-directory: lean
-        run: lake build
-
       - name: Cache Slang toolchain (macOS aarch64)
         uses: actions/cache@v4
         with:
@@ -125,6 +121,10 @@ jobs:
             misc/install-slang.sh
           fi
           bin/slangc -v
+
+      - name: lake build (slangc available so axpy_native links)
+        working-directory: lean
+        run: lake build
 
       - name: Emit every Slang kernel
         working-directory: lean

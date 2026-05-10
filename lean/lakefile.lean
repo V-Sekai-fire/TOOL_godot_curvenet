@@ -7,7 +7,6 @@ require LeanSlang from git
   "https://github.com/V-Sekai-fire/lean-slang.git" @ "v0.0.5"
 
 @[default_target] lean_lib Curvenet where
-  precompileModules := true
 @[default_target] lean_lib LeanGltf where
 
 lean_exe emit_shaders where
