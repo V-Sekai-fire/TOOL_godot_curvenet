@@ -41,7 +41,10 @@ double now_ms() {
 } // namespace
 
 int main() {
-    const double T_CAP_MS = 5000.0;
+    // Generous cap for the gating measurement: HSC build alone is
+    // ~29 s at 81k without sparsify; we want PCG iter count + per-
+    // iter ms before commitment to AMG-classical rewrite.
+    const double T_CAP_MS = 90000.0;
     const double t_start = now_ms();
 
     std::vector<Vec3> positions;

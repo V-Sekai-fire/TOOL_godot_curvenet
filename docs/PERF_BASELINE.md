@@ -325,6 +325,57 @@ start from one frame's actual deformer output to the next.
 
 Reproducer: `make -C tests bench_5k_icc`.
 
+### HSC at 81k — definitive measurement, retract cycle-2
+
+After cycle-1+3 fixes (depth handling, SGS smoother, batch
+IS-elimination, optional sparsify) the no-sparsify HSC was run
+at 81k under a 90 s wall cap to gate the cycle-2 (AMG-classical)
+commitment:
+
+  HSC build      : 28.8 s
+  HSC-PCG solve  : 62.3 s, 68 iters
+  per-iter       : 915 ms/V-cycle
+
+vs ICC at 81k:
+
+  ICC build      : 28.2 s
+  ICC solve      :  3.5 s, ~2500 iters
+  per-iter       :  1.4 ms/backsolve
+
+**HSC is 17.8x SLOWER than ICC** at 81k. The 7-iter convergence
+at 5k did not generalise — 81k V-cycles run 68 iters because
+the deep hierarchy + dense compensated coarse matrices erode the
+preconditioner quality at scale. Even cycle 2 (50% F/C, ~17
+levels) would deliver at best ~3.7x per-V-cycle speedup, landing
+HSC at ~16 s vs ICC's 3.5 s — still 4-5x slower.
+
+Per Gall's-law stop condition from the plan: 3 cycles without
+beating ICC ⇒ retract cycle 2 commitment, leave HSC infra in
+tree as opt-in algorithmic reference, return ICC to production.
+
+The fundamental issue: each V-cycle's per-level work (SGS sweep
++ SpMV + restrict + prolong) costs O(nnz at that level), summed
+over the level chain. Even with O(1) iter count, per-V-cycle
+cost is O(sum_level nnz) which at 81k with deep hierarchy is
+O(563k * sum geometric) ≫ ICC's O(nnz(L)) per backsolve.
+ICC's cost shape (factor once, backsolve cheap) wins
+decisively on this matrix.
+
+**Final state of solver layer**:
+
+  * **ICC(0)-PCG remains production**, gated behind
+    `use_incomplete_cholesky` flag in `CurveNetDeformer3D`.
+  * **HSC infrastructure stays in tree** (Lean spec + C++
+    mirror, batch elimination, V-cycle apply,
+    `cg_hsc_with_guess`) as opt-in. RC props all green.
+    Documented as not-faster-than-ICC at any scale measured.
+  * **`docs/IMPOSSIBILITY.md` remains accurate**: iterative
+    methods cannot hit the 5 ms PCVR target on this matrix
+    regardless of preconditioner family. The path to 5 ms is
+    direct sparse Cholesky (separate multi-loop project).
+
+Reproducer: `make -C tests bench_hsc_81k` (takes ~91 s).
+
 ### HSC after Cycle-1+3 fixes (post-Eigen-ban work)
 
 Loops post-100/16 attempted to make HSC actually faster than ICC.
