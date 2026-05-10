@@ -1,4 +1,5 @@
 import LeanSlang
+import Curvenet.SlangCodegen.Common
 
 /-!
 # `Curvenet.SlangCodegen.ScaledFrames` — per-segment deformation gradient
@@ -25,10 +26,8 @@ Bindings (set 0):
 namespace Curvenet.SlangCodegen.ScaledFrames
 
 open LeanSlang
+open Curvenet.SlangCodegen.Common
 
-private def floatTy : SlangType := .scalar .float
-private def m3Ty    : SlangType := .mat .float 3 3
-private def uintTy  : SlangType := .scalar .uint
 
 /-- `loadM3(buf, base)` packs 9 contiguous floats at `base` into a
     float3x3. Returns by writing into 9 named locals. We expose the

@@ -1,4 +1,5 @@
 import LeanSlang
+import Curvenet.SlangCodegen.Common
 
 /-!
 # `Curvenet.SlangCodegen.DotReduceMulti` — multi-RHS df32 dot reduction
@@ -20,14 +21,13 @@ k*128*8 bytes ≤ 16KB at K_MAX=16, matching Adreno's per-WG ceiling.
 namespace Curvenet.SlangCodegen.DotReduceMulti
 
 open LeanSlang
+open Curvenet.SlangCodegen.Common
 
 private def fIn  (name : String) : SlangBinding :=
   ⟨name, .scalar .float, Semantic.none, none, none, .qIn⟩
 private def fOut (name : String) : SlangBinding :=
   ⟨name, .scalar .float, Semantic.none, none, none, .qOut⟩
 
-private def floatTy : SlangType := .scalar .float
-private def uintTy  : SlangType := .scalar .uint
 
 private def two_sum : SlangFunctionDecl :=
   { attrs := [], retType := .named "void", name := "two_sum"

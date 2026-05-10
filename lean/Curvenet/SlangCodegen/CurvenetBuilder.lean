@@ -1,4 +1,5 @@
 import LeanSlang
+import Curvenet.SlangCodegen.Common
 
 /-!
 # `Curvenet.SlangCodegen.CurvenetBuilder` — per-segment frame assembly
@@ -23,11 +24,8 @@ Bindings:
 namespace Curvenet.SlangCodegen.CurvenetBuilder
 
 open LeanSlang
+open Curvenet.SlangCodegen.Common
 
-private def floatTy : SlangType := .scalar .float
-private def f3Ty    : SlangType := .vec .float 3
-private def m3Ty    : SlangType := .mat .float 3 3
-private def uintTy  : SlangType := .scalar .uint
 
 private def storeM3 (base : SlangExpr) (m : SlangExpr) : List SlangStmt :=
   [ .assign (.index (.var "frames") (.bin "+" base (.litUint 0))) (.member m "_m00")

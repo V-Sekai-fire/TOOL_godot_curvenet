@@ -1,4 +1,5 @@
 import LeanSlang
+import Curvenet.SlangCodegen.Common
 
 /-!
 # `Curvenet.SlangCodegen.SgsColor` — multi-color symmetric Gauss-Seidel
@@ -29,9 +30,8 @@ Bindings (set 0):
 namespace Curvenet.SlangCodegen.SgsColor
 
 open LeanSlang
+open Curvenet.SlangCodegen.Common
 
-private def floatTy : SlangType := .scalar .float
-private def uintTy  : SlangType := .scalar .uint
 
 def shader : SlangShaderModule :=
   { structs :=

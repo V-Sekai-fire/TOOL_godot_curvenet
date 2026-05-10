@@ -1,4 +1,5 @@
 import LeanSlang
+import Curvenet.SlangCodegen.Common
 
 /-!
 # `Curvenet.SlangCodegen.CutMeshLaplacian` — per-(face, vertex) cot weight scatter
@@ -25,10 +26,8 @@ Bindings (set 0):
 namespace Curvenet.SlangCodegen.CutMeshLaplacian
 
 open LeanSlang
+open Curvenet.SlangCodegen.Common
 
-private def floatTy : SlangType := .scalar .float
-private def f3Ty    : SlangType := .vec .float 3
-private def uintTy  : SlangType := .scalar .uint
 
 private def cot_at_apex : SlangFunctionDecl :=
   { attrs := []

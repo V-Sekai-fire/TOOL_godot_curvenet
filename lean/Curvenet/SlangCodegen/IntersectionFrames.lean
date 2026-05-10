@@ -1,4 +1,5 @@
 import LeanSlang
+import Curvenet.SlangCodegen.Common
 
 /-!
 # `Curvenet.SlangCodegen.IntersectionFrames` — paired plus/minus F kernels
@@ -23,10 +24,8 @@ Bindings (set 0):
 namespace Curvenet.SlangCodegen.IntersectionFrames
 
 open LeanSlang
+open Curvenet.SlangCodegen.Common
 
-private def floatTy : SlangType := .scalar .float
-private def m3Ty    : SlangType := .mat .float 3 3
-private def uintTy  : SlangType := .scalar .uint
 
 private def loadM3 : SlangFunctionDecl :=
   { attrs := []

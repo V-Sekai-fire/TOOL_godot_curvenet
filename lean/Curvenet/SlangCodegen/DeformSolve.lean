@@ -1,4 +1,5 @@
 import LeanSlang
+import Curvenet.SlangCodegen.Common
 
 /-!
 # `Curvenet.SlangCodegen.DeformSolve` — per-vertex Poisson RHS assembly
@@ -30,12 +31,8 @@ Bindings (set 0):
 namespace Curvenet.SlangCodegen.DeformSolve
 
 open LeanSlang
+open Curvenet.SlangCodegen.Common
 
-private def floatTy : SlangType := .scalar .float
-private def f3Ty    : SlangType := .vec .float 3
-private def m3Ty    : SlangType := .mat .float 3 3
-private def intTy   : SlangType := .scalar .int
-private def uintTy  : SlangType := .scalar .uint
 
 private def loadM3 : SlangFunctionDecl :=
   { attrs := []

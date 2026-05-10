@@ -1,4 +1,5 @@
 import LeanSlang
+import Curvenet.SlangCodegen.Common
 
 /-!
 # `Curvenet.SlangCodegen.DotReduce` — vector dot product (df32)
@@ -27,6 +28,7 @@ which would defeat the EFTs entirely.
 namespace Curvenet.SlangCodegen.DotReduce
 
 open LeanSlang
+open Curvenet.SlangCodegen.Common
 
 /-- One f32 in/out parameter binding. -/
 private def fIn  (name : String) : SlangBinding :=
@@ -34,8 +36,6 @@ private def fIn  (name : String) : SlangBinding :=
 private def fOut (name : String) : SlangBinding :=
   ⟨name, .scalar .float, Semantic.none, none, none, .qOut⟩
 
-private def floatTy : SlangType := .scalar .float
-private def uintTy  : SlangType := .scalar .uint
 
 private def two_sum : SlangFunctionDecl :=
   { attrs   := []

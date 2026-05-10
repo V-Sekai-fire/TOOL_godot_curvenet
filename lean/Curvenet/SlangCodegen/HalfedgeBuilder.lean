@@ -1,4 +1,5 @@
 import LeanSlang
+import Curvenet.SlangCodegen.Common
 
 /-!
 # `Curvenet.SlangCodegen.HalfedgeBuilder` — twin-pair resolution
@@ -24,9 +25,8 @@ Bindings (set 0):
 namespace Curvenet.SlangCodegen.HalfedgeBuilder
 
 open LeanSlang
+open Curvenet.SlangCodegen.Common
 
-private def intTy  : SlangType := .scalar .int
-private def uintTy : SlangType := .scalar .uint
 
 def shader : SlangShaderModule :=
   { structs :=
