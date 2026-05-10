@@ -197,7 +197,7 @@ inline std::vector<double> forward_sub(const sparse::SparseMatrixCSR &L,
 
 // Backward sub: solve L^T · x = y. Iterates rows in reverse and
 // accumulates contributions of already-resolved x[i+1..] into the
-// current row's RHS via the column structure of L (= row structure
+// current row's right-hand side via the column structure of L (= row structure
 // of L^T).
 inline std::vector<double> backward_sub(const sparse::SparseMatrixCSR &L,
                                             const std::vector<double> &y) {

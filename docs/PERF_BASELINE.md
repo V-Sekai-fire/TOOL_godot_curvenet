@@ -242,6 +242,53 @@ The reproducer for the stall is `tests/diag_multi_level_schwarz_70k`.
 The earlier 70k Chebyshev and 2-level Schwarz diags were removed
 as redundant.
 
+### Warm-start measured at 5k (loop 100/5)
+
+Per Gall's law: measure the working simple system before evolving
+it. The deformer wires `prev_Fv` / `prev_Xv` into
+`cg_with_guess` / `cg_icc_with_guess` to warm-start each frame's
+solve, but the existing `bench_deform_70k` runs cold-start every
+iteration so we'd never measured warm-start in isolation.
+
+`tests/bench_deform_5k_icc.cpp` (5485 verts, 5 s wall cap):
+
+| mode                         | time     | per-frame (×12) | result        |
+|------------------------------|---------:|----------------:|---------------|
+| A. cold-start (x0 = 0)        |   38 ms  |       462 ms    | 2.17 FPS extrapolated |
+| B. warm-start, same b         |  0.17 ms |       2 ms      | warm-start machinery works |
+
+Mode B confirms the warm-start path is wired correctly: when the
+right-hand side hasn't changed, PCG bails on iteration 0
+(residual already below tol) and the solve drops 220× to
+sub-millisecond. The extrapolated 12-vector frame would run at
+~500 FPS — well above the PCVR target — *if* successive frames
+had RHS that didn't drift much.
+
+Real interactive frames do drift (handle drag perturbs the
+right-hand side). The bench used to test this (mode C: warm-start
+with drifted b) was removed because **shifted ICC + drifted RHS
+diverges** — a separate pathology not yet diagnosed:
+
+  * 5k cot-Laplacian needs `diag_shift = 1e-2` to factor without
+    breakdown.
+  * From an exact warm-start `x_warm` to `A x = rhs`, perturbing
+    `rhs → rhs + delta` and re-solving with `x0 = x_warm` blows
+    up the iterate (residual 1e+10 after max-iter, not the
+    expected sub-millisecond convergence).
+  * 81k cot-Laplacian factors at `diag_shift = 0` (no shift
+    needed), which suggests the divergence is shift-induced.
+    Untested at 81k because the bench takes >5 s there.
+
+To evolve from here we need to either: (a) avoid the shift (e.g.
+ICC with controlled fill `p > 0` instead of no-fill), (b)
+project iterates onto range(A) inside `cg_icc_with_guess` to
+prevent constant-mode drift, or (c) measure if the deformer's
+real frame-to-frame perturbation pattern triggers the divergence
+or sidesteps it. (c) is the cheapest test: bench should warm-
+start from one frame's actual deformer output to the next.
+
+Reproducer: `make -C tests bench_5k_icc`.
+
 ### Wired into the deformer ✓ (loop 100/4)
 
 `CurveNetDeformer3D` now exposes a `use_incomplete_cholesky`

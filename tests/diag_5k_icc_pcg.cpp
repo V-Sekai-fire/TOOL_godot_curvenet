@@ -130,7 +130,7 @@ int main() {
     std::printf("ICC(0) factorisation: nnz(L) = %zu, %.2f ms\n",
                   fac.L.values.size(), t_fact);
 
-    // RHS.
+    // right-hand side.
     std::mt19937_64 rng(0xc0ffeeULL);
     std::uniform_real_distribution<double> dist(-1.0, 1.0);
     std::vector<double> y_seed(nv);
