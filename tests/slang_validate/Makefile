@@ -27,7 +27,7 @@ CXXFLAGS   ?= -std=c++17 -O2 -Wall -Wextra -Wno-unused-parameter
 INCLUDES   := -I$(SLANG_DIR)/include -I$(EMITTED)
 
 # Per-test-to-kernel mapping. test_name → kernel_name.
-TESTS      := axpy:axpy saxpby:saxpby jacobi:jacobi mire_axpy:axpy
+TESTS      := axpy:axpy saxpby:saxpby jacobi:jacobi mire_axpy:axpy check_ascii:check_ascii
 
 TEST_NAMES := $(foreach t,$(TESTS),$(word 1,$(subst :, ,$(t))))
 KERNEL_FOR  = $(word 2,$(subst :, ,$(filter $(1):%,$(TESTS))))

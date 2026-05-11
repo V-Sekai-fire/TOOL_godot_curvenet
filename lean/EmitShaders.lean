@@ -18,7 +18,8 @@ open Curvenet.SlangCodegen
 open LeanSlang
 
 private def kernels : List (String × SlangShaderModule) :=
-  [ ("direct_delta_mush", DirectDeltaMush.shader)
+  [ ("check_ascii",       CheckAscii.shader)
+  , ("direct_delta_mush", DirectDeltaMush.shader)
   , ("axpy",              Axpy.shader)
   , ("axpy_multi",        AxpyMulti.shader)
   , ("saxpby",            Saxpby.shader)
