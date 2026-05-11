@@ -151,6 +151,65 @@ example :
     let v2 : Array Float := #[get deformed 3 2 0, get deformed 3 2 1, get deformed 3 2 2]
     vecWithinEps v2 #[5.5, 0.0, 0.8660254037844386] 1e-9 = true := by native_decide
 
+/-! ## Rotation case: posed curve = rest curve rotated 90° around Z
+
+The translation case above produces *uniform* per-vertex deltas, which
+under a morph-target animation looks visually indistinguishable from a
+rigid node translation. To see the algorithm produce per-vertex
+*distinct* deltas — i.e. each vertex moving along its own path —
+we run a second case where the posed curve is the rest curve rotated
+90° around the Z axis. This matches `Fc_rotZ90 / Xc_origin` in
+`DeformSolveExamples` exactly. -/
+
+/-- 90° rotation around Z: `(x, y, z) → (−y, x, z)`. -/
+private def rotZ90 (v : Vec3) : Vec3 := ⟨-v.y, v.x, v.z⟩
+
+/-- Posed control points = rest control points rotated 90° around Z.
+   The Bézier sample at `t = 0.5` stays at the origin since `R_z(90°)`
+   fixes the origin; only the tangent direction changes (X → Y). -/
+private def Pposed0_rot : Vec3 := rotZ90 Prest0
+private def Pposed1_rot : Vec3 := rotZ90 Prest1
+private def Pposed2_rot : Vec3 := rotZ90 Prest2
+private def Pposed3_rot : Vec3 := rotZ90 Prest3
+
+private def posedSampleP_rot  : Vec3 := bezier3 Pposed0_rot Pposed1_rot Pposed2_rot Pposed3_rot tSample
+private def posedForwardQ_rot : Vec3 := bezier3 Pposed0_rot Pposed1_rot Pposed2_rot Pposed3_rot tForward
+
+/-- Deformation gradient at the sample for the rotation case. The rest
+   tangent `(1, 0, 0)` and posed tangent `(0, 1, 0)` are unit-length
+   and orthogonal, so `isolatedSegmentGradient` returns
+   `1 · smallestRotation((1,0,0), (0,1,0)) = R_z(90°)`. -/
+private def F_curve_rot : Mat3 :=
+  isolatedSegmentGradient restSampleP restForwardQ posedSampleP_rot posedForwardQ_rot
+
+/-- Curve-derived `F_c` matches the hand-authored `Fc_rotZ90` in
+   `DeformSolveExamples` to 1 ulp. -/
+example : mat3WithinEps F_curve_rot
+    #[ 0.0, -1.0, 0.0,
+       1.0,  0.0, 0.0,
+       0.0,  0.0, 1.0 ] 1e-12 = true := by native_decide
+
+/-- Sample target = posed Bézier point at `t = 0.5` = origin. -/
+private def Xc_curve_rot : Vec3 := posedSampleP_rot
+
+/-- Deformed positions for the rotation case. -/
+def deformed_rot : Mat :=
+  DeformSolve.solveDeformation
+    CutExamples.triangleWithSample triPositions oneSample
+    F_curve_rot
+    #[Xc_curve_rot.x, Xc_curve_rot.y, Xc_curve_rot.z]
+
+/-- Vertex 1 (rest `(1, 0, 0)`) ends at `R_z(90°) · (1, 0, 0) = (0, 1, 0)`. -/
+example :
+    let v1 : Array Float := #[get deformed_rot 3 1 0, get deformed_rot 3 1 1, get deformed_rot 3 1 2]
+    vecWithinEps v1 #[0.0, 1.0, 0.0] 1e-9 = true := by native_decide
+
+/-- Vertex 2 (rest `(0.5, 0, √3/2)`) ends at `(0, 0.5, √3/2)` (rotation
+   axis is Z, so Z component is preserved). -/
+example :
+    let v2 : Array Float := #[get deformed_rot 3 2 0, get deformed_rot 3 2 1, get deformed_rot 3 2 2]
+    vecWithinEps v2 #[0.0, 0.5, 0.8660254037844386] 1e-9 = true := by native_decide
+
 /-! ## Outputs exposed for the morph-target glTF demo
 
 `ProfileCurvesDemo.lean` reads these to build the `.glb` POSITION
@@ -163,12 +222,22 @@ We do that overlay here so downstream consumers see consistent data. -/
 /-- Rest positions of the 3 mesh vertices. -/
 def restPositions : Array Vec3 := triPositions
 
-/-- Deformed positions, with vertex 0 (the promoted sample) overlaid
-   with the sample target. -/
-def deformedPositions : Array Vec3 :=
+/-- Deformed positions for the **pure translation** case (kept for the
+   regression proof; not the demo's default). -/
+def deformedPositionsTranslate5 : Array Vec3 :=
   #[ Xc_curve
    , ⟨get deformed 3 1 0, get deformed 3 1 1, get deformed 3 1 2⟩
    , ⟨get deformed 3 2 0, get deformed 3 2 1, get deformed 3 2 2⟩ ]
+
+/-- Deformed positions for the **rotation** case — used by the demo
+   exe because the per-vertex deltas differ and a morph-target
+   animation between rest and rotated *visibly* deforms the triangle
+   (vs. the translation case where every delta is identical, indistinguishable
+   from a node transform). -/
+def deformedPositionsRotateZ90 : Array Vec3 :=
+  #[ Xc_curve_rot
+   , ⟨get deformed_rot 3 1 0, get deformed_rot 3 1 1, get deformed_rot 3 1 2⟩
+   , ⟨get deformed_rot 3 2 0, get deformed_rot 3 2 1, get deformed_rot 3 2 2⟩ ]
 
 /-- Triangle indices for the 1-face mesh (CCW winding). -/
 def indices : Array UInt32 := #[0, 1, 2]

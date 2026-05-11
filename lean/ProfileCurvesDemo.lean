@@ -89,22 +89,25 @@ def main (args : List String) : IO UInt32 := do
     | []     => "/tmp/profile_curves_demo.glb"
 
   let rest     := EndToEndExample.restPositions
-  let deformed := EndToEndExample.deformedPositions
+  let deformed := EndToEndExample.deformedPositionsRotateZ90
   let indices  := EndToEndExample.indices
 
-  -- POSITION delta = deformed − rest, per vertex.
+  -- POSITION delta = deformed − rest, per vertex. For the rotation case,
+  -- each vertex's delta is different (unlike pure translation where they
+  -- collapse to one shared offset), so the morph-target animation
+  -- *visibly* deforms the triangle instead of looking like a rigid slide.
   let deltas : Array Vec3 := Array.ofFn (n := rest.size) (fun i =>
     let r := rest[i.val]!
     let d := deformed[i.val]!
     ⟨d.x - r.x, d.y - r.y, d.z - r.z⟩)
 
   /- Bin layout, all aligned to 4-byte boundaries:
-       offset 0  : POSITION    (3 vec3 fp32 = 36 bytes)
-       offset 36 : POSITION_d  (3 vec3 fp32 = 36 bytes)  -- morph delta
-       offset 72 : INDICES     (3 uint32 = 12 bytes)
-       offset 84 : TIME        (2 fp32 = 8 bytes)        -- 0.0, 1.0
-       offset 92 : WEIGHTS     (2 fp32 = 8 bytes)        -- 0.0, 1.0
-       offset 100: end -/
+       offset 0   : POSITION    (3 vec3 fp32 = 36 bytes)
+       offset 36  : POSITION_d  (3 vec3 fp32 = 36 bytes)  -- morph delta
+       offset 72  : INDICES     (3 uint32 = 12 bytes)
+       offset 84  : TIME        (3 fp32 = 12 bytes)       -- 0.0, 1.0, 2.0
+       offset 96  : WEIGHTS     (3 fp32 = 12 bytes)       -- 0.0, 1.0, 0.0  (ping-pong)
+       offset 108 : end -/
   let mut bin : ByteArray := ByteArray.empty
   for v in rest     do bin := pushVec3  bin v
   let dOff : Nat := bin.size
@@ -114,9 +117,11 @@ def main (args : List String) : IO UInt32 := do
   let tOff : Nat := bin.size
   bin := pushFp32LE bin 0.0
   bin := pushFp32LE bin 1.0
+  bin := pushFp32LE bin 2.0
   let wOff : Nat := bin.size
-  bin := pushFp32LE bin 0.0
-  bin := pushFp32LE bin 1.0
+  bin := pushFp32LE bin 0.0  -- rest
+  bin := pushFp32LE bin 1.0  -- fully deformed
+  bin := pushFp32LE bin 0.0  -- back to rest (ping-pong over 2 s; viewer loops the action)
 
   let nVerts := rest.size
   let nTris  := indices.size / 3
@@ -137,9 +142,10 @@ def main (args : List String) : IO UInt32 := do
       min := some dmin, max := some dmax },                                         -- 1: POSITION delta
     { bufferView := some 2, componentType := 5125, count := nTris * 3, type := .scalar },
                                                                                     -- 2: INDICES
-    { bufferView := some 3, componentType := 5126, count := 2, type := .scalar,
-      min := some #[0.0], max := some #[1.0] },                                     -- 3: TIME
-    { bufferView := some 4, componentType := 5126, count := 2, type := .scalar }    -- 4: WEIGHT
+    { bufferView := some 3, componentType := 5126, count := 3, type := .scalar,
+      min := some #[0.0], max := some #[2.0] },                                     -- 3: TIME
+    { bufferView := some 4, componentType := 5126, count := 3, type := .scalar,
+      min := some #[0.0], max := some #[1.0] }                                      -- 4: WEIGHT
   ]
   let primitive : Primitive := {
     attributes := #[("POSITION", 0)],
@@ -157,7 +163,7 @@ def main (args : List String) : IO UInt32 := do
     mesh := some 0
   }
   let anim : Animation := {
-    name := some "Profile-Curves rest → deformed",
+    name := some "Profile-Curves rest → rotated → rest (ping-pong)",
     samplers := #[{ input := 3, output := 4, interpolation := .linear }],
     channels := #[{ sampler := 0, target := { node := some 0, path := .weights } }]
   }
@@ -176,5 +182,5 @@ def main (args : List String) : IO UInt32 := do
   }
   let glb := LeanGltf.GLB.emit doc bin
   IO.FS.writeBinFile outPath glb
-  IO.println s!"wrote {outPath} ({glb.size} bytes; {nVerts} verts, 1 morph target, 1s linear weight animation)"
+  IO.println s!"wrote {outPath} ({glb.size} bytes; {nVerts} verts, 1 morph target, 2 s ping-pong weight animation)"
   return 0
