@@ -172,3 +172,54 @@ jobs:
 
       - name: safetensors round-trip — 9 spec-coverage vectors
         run: make -C tests/safetensors test
+
+      - name: Build the Profile-Curves demo .glb
+        run: |
+          mkdir -p /tmp/profile_curves
+          cd lean && lake exe profile_curves_demo \
+            /tmp/profile_curves/profile_curves_demo.glb
+
+      - name: Upload demo .glb as workflow artifact
+        id: upload-demo
+        uses: actions/upload-artifact@v5
+        with:
+          name: profile-curves-demo-glb
+          path: /tmp/profile_curves/profile_curves_demo.glb
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Comment on PR with nightly.link to the .glb
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          REPO="${{ github.repository }}"
+          RUN_ID="${{ github.run_id }}"
+          ART_ID="${{ steps.upload-demo.outputs.artifact-id }}"
+          NIGHTLY_RUN="https://nightly.link/${REPO}/actions/runs/${RUN_ID}/profile-curves-demo-glb.zip"
+          NIGHTLY_ART="https://nightly.link/${REPO}/actions/artifacts/${ART_ID}.zip"
+          ACTIONS_RUN="https://github.com/${REPO}/actions/runs/${RUN_ID}"
+
+          BODY=$(cat <<MSG
+          <!-- profile-curves-demo-link -->
+          ### Profile-Curves demo \`.glb\`
+
+          - **Direct download (no GitHub login):** [\`profile-curves-demo-glb.zip\`](${NIGHTLY_ART}) (via [nightly.link](https://nightly.link)).
+          - Same artifact, run-scoped: [\`profile-curves-demo-glb.zip\` for this run](${NIGHTLY_RUN}).
+          - GitHub Actions run page: [run #${RUN_ID}](${ACTIONS_RUN}).
+
+          The zip contains \`profile_curves_demo.glb\` — the smallest end-to-end Profile Curves rig (one cubic Bézier driving the 3-vertex \`triangleWithSample\` mesh) with a 1 s linear morph-target animation interpolating from rest → deformed. Drop it into Blender 5.x, [model-viewer.dev](https://modelviewer.dev/editor/), or [gltf-viewer.donmccurdy.com](https://gltf-viewer.donmccurdy.com) and the animation plays back immediately.
+          MSG
+          )
+
+          # Replace any previous bot comment that has the marker.
+          PR_NUM="${{ github.event.pull_request.number }}"
+          EXISTING=$(gh api "repos/${REPO}/issues/${PR_NUM}/comments" \
+                       --jq '[.[] | select(.body | contains("<!-- profile-curves-demo-link -->"))][0].id')
+          if [ -n "$EXISTING" ] && [ "$EXISTING" != "null" ]; then
+            gh api -X PATCH "repos/${REPO}/issues/comments/${EXISTING}" \
+              -f body="${BODY}" >/dev/null
+            echo "Updated comment $EXISTING"
+          else
+            gh pr comment "$PR_NUM" --body "${BODY}"
+          fi

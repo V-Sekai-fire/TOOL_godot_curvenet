@@ -29,6 +29,9 @@ lean_exe safetensors_to_gltf where
 lean_exe safetensors_zup_to_yup where
   root := `SafetensorsZupToYup
 
+lean_exe profile_curves_demo where
+  root := `ProfileCurvesDemo
+
 extern_lib axpy_native pkg := do
   let workDir := pkg.dir / "native"
   let oFile  := pkg.buildDir / "native" / "axpy_shim.o"

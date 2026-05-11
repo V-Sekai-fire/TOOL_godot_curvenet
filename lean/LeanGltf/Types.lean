@@ -141,30 +141,45 @@ structure Primitive where
   indices    : Option Nat := none
   material   : Option Nat := none
   mode       : Nat := TRIANGLES
+  /-- Morph targets, per glTF 2.0 §3.6.2.1. Each target is its own
+  attribute-name → accessor-index map (POSITION / NORMAL / TANGENT
+  *deltas* relative to the base attribute). The host mesh's `weights`
+  picks the blend per target. -/
+  targets    : Array (Array (String × Nat)) := #[]
   deriving Repr
 
 namespace Primitive
   def toJson (p : Primitive) : Value :=
     let attrs : Value :=
       .obj (p.attributes.map (fun (k, n) => (k, .int (Int.ofNat n))))
+    let targetsJson : Option Value :=
+      if p.targets.isEmpty then none
+      else some (.arr (p.targets.map (fun t =>
+        .obj (t.map (fun (k, n) => (k, .int (Int.ofNat n)))))))
     obj? #[
       ("attributes", some attrs),
       ("indices",    p.indices.map (fun n => .int (Int.ofNat n))),
       ("material",   p.material.map (fun n => .int (Int.ofNat n))),
-      ("mode",       if p.mode = TRIANGLES then none else some (.int (Int.ofNat p.mode)))
+      ("mode",       if p.mode = TRIANGLES then none else some (.int (Int.ofNat p.mode))),
+      ("targets",    targetsJson)
     ]
 end Primitive
 
 structure Mesh where
   primitives : Array Primitive
   name       : Option String := none
+  /-- Initial morph-target weights, one entry per target on every
+  primitive (glTF requires all primitives in a mesh share target count).
+  Animations bind to this via `AnimPath.weights`. -/
+  weights    : Array Float := #[]
   deriving Repr
 
 namespace Mesh
   def toJson (m : Mesh) : Value :=
     obj? #[
       ("primitives", some (.arr (m.primitives.map Primitive.toJson))),
-      ("name",       m.name.map .str)
+      ("name",       m.name.map .str),
+      ("weights",    if m.weights.isEmpty then none else some (JSON.ofFloatArr m.weights))
     ]
 end Mesh
 
