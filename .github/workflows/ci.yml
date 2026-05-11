@@ -208,7 +208,9 @@ jobs:
           - Same artifact, run-scoped: [\`profile-curves-demo-glb.zip\` for this run](${NIGHTLY_RUN}).
           - GitHub Actions run page: [run #${RUN_ID}](${ACTIONS_RUN}).
 
-          The zip contains \`profile_curves_demo.glb\` — the smallest end-to-end Profile Curves rig (one cubic Bézier driving the 3-vertex \`triangleWithSample\` mesh) with a 1 s linear morph-target animation interpolating from rest → deformed. Drop it into Blender 5.x, [model-viewer.dev](https://modelviewer.dev/editor/), or [gltf-viewer.donmccurdy.com](https://gltf-viewer.donmccurdy.com) and the animation plays back immediately.
+          The zip contains \`profile_curves_demo.glb\` — the smallest end-to-end Profile Curves rig (one cubic Bézier driving the 3-vertex \`triangleWithSample\` mesh). The posed curve is the rest curve **rotated 90° around Z**, so the curve-derived F_c is \`R_z(90°)\` and the per-vertex morph-target deltas are distinct (v0 fixed at the sample, v1 → (0, 1, 0), v2 → (0, 0.5, √3/2)). The animation is a 2 s **ping-pong** rest → rotated → rest, so a looping viewer cycles the deformation visibly.
+
+          Drop it into Blender 5.x, [model-viewer.dev](https://modelviewer.dev/editor/), or [gltf-viewer.donmccurdy.com](https://gltf-viewer.donmccurdy.com) and the deform plays back immediately.
           MSG
           )
 
